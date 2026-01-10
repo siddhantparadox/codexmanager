@@ -41,6 +41,16 @@ type SkillDraft = {
 const NEW_SKILL_TEMPLATE = `---\nname: New Skill\ndescription: Short description\n---\n\n# New Skill\nDescribe behavior here.\n`;
 const cardDelay = (delay: string): CSSProperties =>
   ({ "--delay": delay } as CSSProperties);
+const INFO_LINKS = {
+  model: {
+    title: "To view available models, go to:",
+    url: "https://developers.openai.com/codex/models/"
+  },
+  model_reasoning_effort: {
+    title: "To view available reasoning effort values, go to:",
+    url: "https://developers.openai.com/codex/config-reference/#configtoml:~:text=model_reasoning_effort"
+  }
+} as const;
 
 export default function App() {
   const [active, setActive] = useState<NavId>("dashboard");
@@ -199,7 +209,13 @@ export default function App() {
     <div className="app-shell">
       <aside className="sidebar">
         <div className="brand">
-          <div className="brand-mark">CM</div>
+          <div className="brand-mark">
+            <img
+              src="/logo.png"
+              alt="Codex Manager logo"
+              className="brand-logo"
+            />
+          </div>
           <div>
             <p className="brand-title">Codex Manager</p>
             <p className="brand-subtitle">Trust-first configuration desk</p>
@@ -780,11 +796,32 @@ function ScalarRow({
   onPreview: (value: string) => void;
 }) {
   const displayValue = editValue ?? item.value;
+  const info = INFO_LINKS[item.key as keyof typeof INFO_LINKS];
+  const keyLabel = (
+    <span className="table-key">
+      <span className="key-text">{item.key}</span>
+      {info ? (
+        <span
+          className="info-hint"
+          tabIndex={0}
+          aria-label={`${info.title} ${info.url}`}
+        >
+          <span className="info-icon" aria-hidden="true">
+            i
+          </span>
+          <span className="info-tooltip">
+            <span className="info-title">{info.title}</span>
+            <span className="info-url">{info.url}</span>
+          </span>
+        </span>
+      ) : null}
+    </span>
+  );
   if (item.kind === "boolean") {
     const checked = displayValue.toLowerCase() === "true";
     return (
       <div className="table-row">
-        <span>{item.key}</span>
+        {keyLabel}
         <label className="switch">
           <input
             type="checkbox"
@@ -802,7 +839,7 @@ function ScalarRow({
 
   return (
     <div className="table-row">
-      <span>{item.key}</span>
+      {keyLabel}
       <input
         value={displayValue}
         onChange={(event) => onEdit(event.target.value)}
