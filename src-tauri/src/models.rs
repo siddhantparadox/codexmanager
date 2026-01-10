@@ -50,6 +50,13 @@ pub struct SkillSummary {
 }
 
 #[derive(Debug, Serialize)]
+pub struct UserConfigSummary {
+  pub id: String,
+  pub name: String,
+  pub modified: Option<String>,
+}
+
+#[derive(Debug, Serialize)]
 pub struct Diagnostic {
   pub level: String,
   pub message: String,
@@ -98,6 +105,8 @@ pub enum ChangeRequest {
   },
   UpdateSkill { path: String, content: String },
   DeleteSkill { path: String },
+  SaveUserConfig { name: String, content: String },
+  DeleteUserConfig { name: String },
   RestoreBackup { backup_id: String },
 }
 

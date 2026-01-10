@@ -1,12 +1,15 @@
 import { useEffect, useMemo, useState } from "react";
 import type { CSSProperties } from "react";
+import { openUrl } from "@tauri-apps/plugin-opener";
 import {
   applyChange,
   getSettings,
   listBackups,
+  listUserConfigs,
   previewChange,
   readConfigText,
   readSkillText,
+  readUserConfigText,
   scanState,
   updateSettings
 } from "./lib/api";
@@ -17,7 +20,8 @@ import type {
   PreviewResult,
   ScanState,
   ScalarValue,
-  SkillSummary
+  SkillSummary,
+  UserConfigSummary
 } from "./lib/types";
 
 const NAV_ITEMS = [
@@ -29,7 +33,7 @@ const NAV_ITEMS = [
   { id: "settings", label: "Settings" }
 ] as const;
 
-type NavId = (typeof NAV_ITEMS)[number]["id"];
+type NavId = (typeof NAV_ITEMS)[number]["id"] | "config-library" | "config-my";
 
 type SkillDraft = {
   name: string;
@@ -51,6 +55,40 @@ const INFO_LINKS = {
     url: "https://developers.openai.com/codex/config-reference/#configtoml:~:text=model_reasoning_effort"
   }
 } as const;
+const PUBLIC_CONFIGS = [
+  {
+    id: "steipete-inference-speed",
+    title: "Shipping at inference speed (Pete)",
+    url: "https://steipete.me/posts/2025/shipping-at-inference-speed#my-config",
+    summary: "High-throughput Codex defaults with safe compaction headroom.",
+    config: `model = "gpt-5.2-codex"
+model_reasoning_effort = "high"
+tool_output_token_limit = 25000
+# Leave room for native compaction near the 272273k context window.
+# Formula: 273000 - (tool_output_token_limit + 15000)
+# With tool_output_token_limit=25000  273000 - (25000 + 15000) = 233000
+model_auto_compact_token_limit = 233000
+[features]
+ghost_commit = false
+unified_exec = true
+apply_patch_freeform = true
+web_search_request = true
+skills = true
+shell_snapshot = true
+
+[projects."/Users/steipete/Projects"]
+trust_level = "trusted"
+`
+  }
+] as const;
+
+async function openExternal(url: string) {
+  try {
+    await openUrl(url);
+  } catch {
+    window.open(url, "_blank", "noopener,noreferrer");
+  }
+}
 
 export default function App() {
   const [active, setActive] = useState<NavId>("dashboard");
@@ -61,6 +99,13 @@ export default function App() {
   const [configText, setConfigText] = useState<ConfigText | null>(null);
   const [configDraft, setConfigDraft] = useState<string>("");
   const [scalarEdits, setScalarEdits] = useState<Record<string, string>>({});
+  const [userConfigs, setUserConfigs] = useState<UserConfigSummary[]>([]);
+  const [selectedUserConfig, setSelectedUserConfig] =
+    useState<UserConfigSummary | null>(null);
+  const [userConfigText, setUserConfigText] = useState<ConfigText | null>(null);
+  const [userConfigDraft, setUserConfigDraft] = useState<string>("");
+  const [newConfigName, setNewConfigName] = useState("");
+  const [newConfigContent, setNewConfigContent] = useState("");
   const [preview, setPreview] = useState<PreviewResult | null>(null);
   const [pendingChange, setPendingChange] = useState<ChangeRequest | null>(null);
   const [busy, setBusy] = useState(false);
@@ -68,6 +113,9 @@ export default function App() {
   const [error, setError] = useState<string | null>(null);
   const [selectedSkill, setSelectedSkill] = useState<SkillSummary | null>(null);
   const [skillText, setSkillText] = useState<string>("");
+  const [libraryExpanded, setLibraryExpanded] = useState<Record<string, boolean>>(
+    {}
+  );
   const [newSkill, setNewSkill] = useState<SkillDraft>({
     name: "",
     scope: "user",
@@ -86,6 +134,12 @@ export default function App() {
       setSettingsDraft(scan.settings);
     }
   }, [scan]);
+
+  useEffect(() => {
+    if (active === "config-my") {
+      void loadUserConfigs();
+    }
+  }, [active]);
 
   async function refresh() {
     setBusy(true);
@@ -116,6 +170,35 @@ export default function App() {
     }
   }
 
+  async function loadUserConfigs(silent = false) {
+    if (!silent) {
+      setBusy(true);
+      setError(null);
+    }
+    try {
+      const next = await listUserConfigs();
+      const match = selectedUserConfig
+        ? next.find((config) => config.id === selectedUserConfig.id)
+        : null;
+      setUserConfigs(next);
+      if (selectedUserConfig) {
+        if (match) {
+          setSelectedUserConfig(match);
+        } else {
+          setSelectedUserConfig(null);
+          setUserConfigText(null);
+          setUserConfigDraft("");
+        }
+      }
+    } catch (err) {
+      setError(normalizeError(err));
+    } finally {
+      if (!silent) {
+        setBusy(false);
+      }
+    }
+  }
+
   async function openPreview(change: ChangeRequest) {
     setBusy(true);
     setError(null);
@@ -143,6 +226,9 @@ export default function App() {
       if (active === "config") {
         await loadConfig();
       }
+      if (active === "config-my") {
+        await loadUserConfigs(true);
+      }
     } catch (err) {
       setError(normalizeError(err));
     } finally {
@@ -158,6 +244,23 @@ export default function App() {
     try {
       const text = await readSkillText(skill.path);
       setSkillText(text);
+    } catch (err) {
+      setError(normalizeError(err));
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function handleUserConfigSelect(config: UserConfigSummary) {
+    setSelectedUserConfig(config);
+    setUserConfigText(null);
+    setUserConfigDraft("");
+    setBusy(true);
+    setError(null);
+    try {
+      const text = await readUserConfigText(config.id);
+      setUserConfigText(text);
+      setUserConfigDraft(text.text);
     } catch (err) {
       setError(normalizeError(err));
     } finally {
@@ -204,6 +307,8 @@ export default function App() {
   }, [scan]);
 
   const diagnostics = scan?.diagnostics ?? [];
+  const configActive =
+    active === "config" || active === "config-library" || active === "config-my";
 
   return (
     <div className="app-shell">
@@ -222,15 +327,40 @@ export default function App() {
           </div>
         </div>
         <nav className="nav">
-          {NAV_ITEMS.map((item) => (
-            <button
-              key={item.id}
-              className={`nav-item ${active === item.id ? "active" : ""}`}
-              onClick={() => setActive(item.id)}
-            >
-              {item.label}
-            </button>
-          ))}
+          {NAV_ITEMS.map((item) => {
+            const isConfig = item.id === "config";
+            const isActive = isConfig ? configActive : active === item.id;
+            return (
+              <div key={item.id} className="nav-group">
+                <button
+                  className={`nav-item ${isActive ? "active" : ""}`}
+                  onClick={() => setActive(item.id)}
+                >
+                  {item.label}
+                </button>
+                {isConfig && configActive ? (
+                  <div className="subnav">
+                    <button
+                      className={`subnav-item ${
+                        active === "config-library" ? "active" : ""
+                      }`}
+                      onClick={() => setActive("config-library")}
+                    >
+                      Public Config Library
+                    </button>
+                    <button
+                      className={`subnav-item ${
+                        active === "config-my" ? "active" : ""
+                      }`}
+                      onClick={() => setActive("config-my")}
+                    >
+                      My Configs
+                    </button>
+                  </div>
+                ) : null}
+              </div>
+            );
+          })}
         </nav>
         <div className="sidebar-foot">
           <p className="foot-label">Codex home</p>
@@ -400,6 +530,228 @@ export default function App() {
                   disabled={!configDraft}
                 >
                   Preview raw change
+                </button>
+              </div>
+            </div>
+          </section>
+        )}
+
+        {active === "config-library" && (
+          <section className="stack">
+            <div className="panel">
+              <div className="panel-header">
+                <h2>Public Config Library</h2>
+                <span className="panel-meta">Curated presets</span>
+              </div>
+              <p className="panel-note">
+                A place to find and apply public config files with a diff preview
+                before any write.
+              </p>
+              <div className="list">
+                {PUBLIC_CONFIGS.map((entry) => {
+                  const expanded = Boolean(libraryExpanded[entry.id]);
+                  return (
+                    <div key={entry.id} className="library-item">
+                      <div className="row library-row">
+                        <div className="row-body">
+                          <p className="row-title">{entry.title}</p>
+                          <a
+                            className="row-link"
+                            href={entry.url}
+                            target="_blank"
+                            rel="noreferrer"
+                            onClick={(event) => {
+                              event.preventDefault();
+                              void openExternal(entry.url);
+                            }}
+                          >
+                            {entry.url}
+                          </a>
+                          <p className="row-meta">{entry.summary}</p>
+                        </div>
+                        <div className="row-actions">
+                          <button
+                            className="ghost-button"
+                            onClick={() =>
+                              setLibraryExpanded((prev) => ({
+                                ...prev,
+                                [entry.id]: !expanded
+                              }))
+                            }
+                          >
+                            {expanded ? "Hide" : "View"}
+                          </button>
+                          <button
+                            className="primary"
+                            onClick={() =>
+                              openPreview({
+                                type: "replace_config",
+                                content: entry.config
+                              })
+                            }
+                          >
+                            Apply
+                          </button>
+                        </div>
+                      </div>
+                      {expanded ? (
+                        <pre className="code-block">{entry.config}</pre>
+                      ) : null}
+                    </div>
+                  );
+                })}
+              </div>
+            </div>
+          </section>
+        )}
+
+        {active === "config-my" && (
+          <section className="split">
+            <div className="panel">
+              <div className="panel-header">
+                <h2>My configs</h2>
+                <span className="panel-meta">Saved presets</span>
+              </div>
+              <p className="panel-note">
+                Personal presets stored in app data, ready to apply with a diff
+                preview.
+              </p>
+              {userConfigs.length ? (
+                <div className="list">
+                  {userConfigs.map((config) => (
+                    <button
+                      key={config.id}
+                      className={`list-item ${
+                        selectedUserConfig?.id === config.id ? "active" : ""
+                      }`}
+                      onClick={() => handleUserConfigSelect(config)}
+                    >
+                      <div>
+                        <p className="row-title">{config.name}</p>
+                        <p className="row-meta">
+                          {config.modified ?? "Saved preset"}
+                        </p>
+                      </div>
+                    </button>
+                  ))}
+                </div>
+              ) : (
+                <p className="ghost">No saved configs yet.</p>
+              )}
+            </div>
+            <div className="panel">
+              <div className="panel-header">
+                <h2>Editor</h2>
+                <span className="panel-meta">
+                  {selectedUserConfig ? selectedUserConfig.name : "Select a config"}
+                </span>
+              </div>
+              {selectedUserConfig ? (
+                <>
+                  <p className="panel-note">
+                    {userConfigText?.redacted
+                      ? "Sensitive values are masked and preserved on save."
+                      : "Edit cautiously and always preview the diff."}
+                  </p>
+                  <textarea
+                    className="editor"
+                    value={userConfigDraft}
+                    onChange={(event) => setUserConfigDraft(event.target.value)}
+                  />
+                  <div className="panel-actions">
+                    <button
+                      className="primary"
+                      onClick={() =>
+                        openPreview({
+                          type: "save_user_config",
+                          name: selectedUserConfig.id,
+                          content: userConfigDraft
+                        })
+                      }
+                      disabled={!userConfigDraft.trim()}
+                    >
+                      Preview save
+                    </button>
+                    <button
+                      className="ghost-button"
+                      onClick={() =>
+                        openPreview({
+                          type: "replace_config",
+                          content: userConfigDraft
+                        })
+                      }
+                      disabled={!userConfigDraft.trim()}
+                    >
+                      Preview apply to config
+                    </button>
+                    <button
+                      className="ghost-button"
+                      onClick={() =>
+                        openPreview({
+                          type: "delete_user_config",
+                          name: selectedUserConfig.id
+                        })
+                      }
+                    >
+                      Preview delete
+                    </button>
+                  </div>
+                </>
+              ) : (
+                <p className="ghost">Select a saved config to edit.</p>
+              )}
+            </div>
+            <div className="panel span-full">
+              <div className="panel-header">
+                <h2>Create config</h2>
+                <span className="panel-meta">New preset</span>
+              </div>
+              <p className="panel-note">
+                Names are saved as file-safe ids under app data.
+              </p>
+              <div className="form-grid">
+                <label className="span-2">
+                  Name
+                  <input
+                    value={newConfigName}
+                    onChange={(event) => setNewConfigName(event.target.value)}
+                    placeholder="my-config"
+                  />
+                </label>
+                <label className="span-2">
+                  Content (TOML)
+                  <textarea
+                    value={newConfigContent}
+                    onChange={(event) => setNewConfigContent(event.target.value)}
+                    placeholder='model = "gpt-5.2-codex"'
+                  />
+                </label>
+              </div>
+              <div className="panel-actions">
+                <button
+                  className="primary"
+                  onClick={() =>
+                    openPreview({
+                      type: "save_user_config",
+                      name: newConfigName,
+                      content: newConfigContent
+                    })
+                  }
+                  disabled={!newConfigName.trim() || !newConfigContent.trim()}
+                >
+                  Preview save
+                </button>
+                <button
+                  className="ghost-button"
+                  onClick={() =>
+                    openPreview({
+                      type: "replace_config",
+                      content: newConfigContent
+                    })
+                  }
+                  disabled={!newConfigContent.trim()}
+                >
+                  Preview apply to config
                 </button>
               </div>
             </div>
@@ -900,6 +1252,8 @@ function normalizeError(error: unknown) {
 }
 
 function labelFor(page: NavId) {
+  if (page === "config-library") return "Public Config Library";
+  if (page === "config-my") return "My Configs";
   const item = NAV_ITEMS.find((nav) => nav.id === page);
   return item ? item.label : "Codex Manager";
 }
@@ -910,6 +1264,10 @@ function subtitleFor(page: NavId) {
       return "A live snapshot of trust, safety, and scope.";
     case "config":
       return "Inspect and edit Codex config with guarded diffs.";
+    case "config-library":
+      return "Browse and apply trusted public config presets.";
+    case "config-my":
+      return "Create, store, and apply your own config presets.";
     case "mcp":
       return "Toggle servers and author new MCP entries.";
     case "skills":

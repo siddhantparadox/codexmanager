@@ -10,7 +10,7 @@ use walkdir::WalkDir;
 use crate::errors::{AppError, AppResult};
 use crate::models::{
   BackupFile, BackupManifest, BackupSummary, ConfigScalar, ConfigSummary,
-  McpServerSummary, SkillSummary, SkillScope,
+  McpServerSummary, SkillSummary, SkillScope, UserConfigSummary,
 };
 
 pub fn read_text_file(path: &Path) -> AppResult<String> {
@@ -251,6 +251,45 @@ pub fn scan_skills(user_root: &Path, repo_roots: &[PathBuf]) -> Vec<SkillSummary
   }
   skills.sort_by(|a, b| a.name.cmp(&b.name));
   skills
+}
+
+pub fn list_user_configs(root: &Path) -> AppResult<Vec<UserConfigSummary>> {
+  if !root.exists() {
+    return Ok(Vec::new());
+  }
+  let mut configs = Vec::new();
+  for entry in fs::read_dir(root)? {
+    let entry = entry?;
+    if !entry.file_type()?.is_file() {
+      continue;
+    }
+    let path = entry.path();
+    let is_toml = path
+      .extension()
+      .and_then(|ext| ext.to_str())
+      .map(|ext| ext.eq_ignore_ascii_case("toml"))
+      .unwrap_or(false);
+    if !is_toml {
+      continue;
+    }
+    let id = path
+      .file_stem()
+      .and_then(|name| name.to_str())
+      .unwrap_or("config")
+      .to_string();
+    let modified = entry
+      .metadata()
+      .ok()
+      .and_then(|meta| meta.modified().ok())
+      .and_then(|time| OffsetDateTime::from(time).format(&Rfc3339).ok());
+    configs.push(UserConfigSummary {
+      id: id.clone(),
+      name: id,
+      modified,
+    });
+  }
+  configs.sort_by(|a, b| a.name.cmp(&b.name));
+  Ok(configs)
 }
 
 fn scan_skills_root(root: &Path, scope: SkillScope, repo_root: Option<&PathBuf>) -> Vec<SkillSummary> {

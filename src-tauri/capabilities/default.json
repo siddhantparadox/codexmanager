@@ -1,0 +1,6 @@
+{
+  "identifier": "main",
+  "description": "Default permissions for the main window.",
+  "windows": ["*"],
+  "permissions": ["core:default", "opener:default"]
+}

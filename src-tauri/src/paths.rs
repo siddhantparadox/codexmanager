@@ -27,6 +27,10 @@ impl AppPaths {
   pub fn backups_dir(&self) -> PathBuf {
     self.app_data_dir.join("backups")
   }
+
+  pub fn user_configs_dir(&self) -> PathBuf {
+    self.app_data_dir.join("user-configs")
+  }
 }
 
 pub fn default_codex_home() -> AppResult<PathBuf> {
@@ -68,6 +72,24 @@ pub fn sanitize_skill_name(name: &str) -> AppResult<String> {
   let trimmed = name.trim();
   if trimmed.is_empty() {
     return Err(AppError::new("invalid_name", "Skill name cannot be empty"));
+  }
+  let cleaned: String = trimmed
+    .chars()
+    .map(|ch| {
+      if ch.is_ascii_alphanumeric() || ch == '-' || ch == '_' {
+        ch
+      } else {
+        '-'
+      }
+    })
+    .collect();
+  Ok(cleaned)
+}
+
+pub fn sanitize_config_name(name: &str) -> AppResult<String> {
+  let trimmed = name.trim();
+  if trimmed.is_empty() {
+    return Err(AppError::new("invalid_name", "Config name cannot be empty"));
   }
   let cleaned: String = trimmed
     .chars()

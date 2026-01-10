@@ -113,6 +113,12 @@ body::before {
   gap: 12px;
 }
 
+.nav-group {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
 .nav-item {
   border: 1px solid transparent;
   background: transparent;
@@ -135,6 +141,38 @@ body::before {
   color: white;
   border-color: var(--accent-2);
   box-shadow: 0 8px 20px rgba(31, 79, 63, 0.25);
+}
+
+.subnav {
+  margin-left: 14px;
+  padding-left: 12px;
+  border-left: 1px solid var(--line);
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.subnav-item {
+  border: 1px solid transparent;
+  background: transparent;
+  padding: 8px 12px;
+  text-align: left;
+  border-radius: 12px;
+  font-size: 13px;
+  cursor: pointer;
+  transition: all 0.2s ease;
+  color: rgba(15, 26, 23, 0.78);
+}
+
+.subnav-item:hover {
+  border-color: var(--line);
+  background: rgba(31, 79, 63, 0.08);
+}
+
+.subnav-item.active {
+  border-color: rgba(31, 79, 63, 0.25);
+  background: rgba(31, 79, 63, 0.12);
+  color: var(--accent-2);
 }
 
 .sidebar-foot {
@@ -387,6 +425,54 @@ body::before {
 
 .row:last-child {
   border-bottom: none;
+}
+
+.row-body {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.row-link {
+  font-size: 12px;
+  color: var(--accent-2);
+  text-decoration: none;
+  word-break: break-all;
+}
+
+.row-link:hover {
+  text-decoration: underline;
+}
+
+.library-item {
+  padding: 14px 0;
+  border-bottom: 1px solid var(--line);
+}
+
+.library-item:last-child {
+  border-bottom: none;
+}
+
+.library-row {
+  padding: 0;
+  border-bottom: none;
+  align-items: flex-start;
+}
+
+.library-row .row-actions {
+  align-items: flex-start;
+}
+
+.code-block {
+  margin: 12px 0 0;
+  padding: 14px;
+  border-radius: 12px;
+  border: 1px solid var(--line);
+  background: var(--panel-2);
+  font-family: var(--mono);
+  font-size: 12px;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
 }
 
 .row-title {

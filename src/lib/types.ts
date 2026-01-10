@@ -25,6 +25,12 @@ export type SkillSummary = {
   modified?: string | null;
 };
 
+export type UserConfigSummary = {
+  id: string;
+  name: string;
+  modified?: string | null;
+};
+
 export type Diagnostic = {
   level: "info" | "warn" | "error";
   message: string;
@@ -96,4 +102,6 @@ export type ChangeRequest =
     }
   | { type: "update_skill"; path: string; content: string }
   | { type: "delete_skill"; path: string }
+  | { type: "save_user_config"; name: string; content: string }
+  | { type: "delete_user_config"; name: string }
   | { type: "restore_backup"; backup_id: string };

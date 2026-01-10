@@ -6,7 +6,8 @@ import type {
   ConfigText,
   PreviewResult,
   ScanState,
-  Settings
+  Settings,
+  UserConfigSummary
 } from "./types";
 
 export async function getSettings(): Promise<Settings> {
@@ -27,6 +28,14 @@ export async function readConfigText(): Promise<ConfigText> {
 
 export async function readSkillText(path: string): Promise<string> {
   return invoke("read_skill_text", { path });
+}
+
+export async function listUserConfigs(): Promise<UserConfigSummary[]> {
+  return invoke("list_user_configs");
+}
+
+export async function readUserConfigText(name: string): Promise<ConfigText> {
+  return invoke("read_user_config_text", { name });
 }
 
 export async function previewChange(change: ChangeRequest): Promise<PreviewResult> {

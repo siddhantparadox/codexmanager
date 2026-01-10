@@ -7,11 +7,11 @@ use crate::errors::{AppError, AppResult};
 use crate::fs;
 use crate::models::{
   ApplyResult, ChangeRequest, ConfigText, Diagnostic, PreviewFile, PreviewResult, ScanState,
-  Settings, SkillScope,
+  Settings, SkillScope, UserConfigSummary,
 };
 use crate::paths::{
-  config_path, is_within_root, repo_skills_root, resolve_codex_home, sanitize_skill_name,
-  user_skills_root, AppPaths,
+  config_path, is_within_root, repo_skills_root, resolve_codex_home, sanitize_config_name,
+  sanitize_skill_name, user_skills_root, AppPaths,
 };
 use crate::state::{load_settings, normalize_settings, save_settings, AppState};
 use crate::toml_patch;
@@ -111,6 +111,27 @@ pub fn read_skill_text(
 }
 
 #[tauri::command]
+pub fn list_user_configs(app: AppHandle) -> AppResult<Vec<UserConfigSummary>> {
+  let paths = AppPaths::from_app(&app)?;
+  fs::list_user_configs(&paths.user_configs_dir())
+}
+
+#[tauri::command]
+pub fn read_user_config_text(app: AppHandle, name: String) -> AppResult<ConfigText> {
+  let paths = AppPaths::from_app(&app)?;
+  let path = user_config_path(&paths, &name)?;
+  if !path.exists() {
+    return Err(AppError::new("config_missing", "Saved config not found"));
+  }
+  let text = fs::read_text_file(&path)?;
+  let redacted = toml_patch::redact_toml(&text)?;
+  Ok(ConfigText {
+    text: redacted,
+    redacted: toml_patch::contains_sensitive_keys(&text),
+  })
+}
+
+#[tauri::command]
 pub fn preview_change(
   app: AppHandle,
   state: State<Mutex<AppState>>,
@@ -187,6 +208,7 @@ struct FileChange {
   path: PathBuf,
   before: Option<String>,
   after: Option<String>,
+  redact: bool,
 }
 
 fn build_change_plan(
@@ -208,6 +230,7 @@ fn build_change_plan(
         before,
         after,
         true,
+        true,
       ))
     }
     ChangeRequest::SetConfigScalar { key, value } => {
@@ -219,6 +242,7 @@ fn build_change_plan(
         config_path,
         before,
         after,
+        true,
         true,
       ))
     }
@@ -248,6 +272,7 @@ fn build_change_plan(
           path: config_path,
           before,
           after: Some(merged),
+          redact: true,
         }],
         warnings,
         validate_config: true,
@@ -263,6 +288,7 @@ fn build_change_plan(
         before,
         after,
         true,
+        true,
       ))
     }
     ChangeRequest::DeleteMcpServer { name } => {
@@ -274,6 +300,7 @@ fn build_change_plan(
         config_path,
         before,
         after,
+        true,
         true,
       ))
     }
@@ -295,6 +322,7 @@ fn build_change_plan(
           path,
           before,
           after: Some(content),
+          redact: false,
         }],
         warnings: Vec::new(),
         validate_config: false,
@@ -312,6 +340,7 @@ fn build_change_plan(
           path,
           before: Some(before),
           after: Some(content),
+          redact: false,
         }],
         warnings: Vec::new(),
         validate_config: false,
@@ -329,6 +358,60 @@ fn build_change_plan(
           path,
           before: Some(before),
           after: None,
+          redact: false,
+        }],
+        warnings: Vec::new(),
+        validate_config: false,
+      })
+    }
+    ChangeRequest::SaveUserConfig { name, content } => {
+      let paths = AppPaths::from_app(app)?;
+      let path = user_config_path(&paths, &name)?;
+      let before = if path.exists() {
+        Some(fs::read_text_file(&path)?)
+      } else {
+        None
+      };
+      let merged = if let Some(existing) = before.as_deref() {
+        toml_patch::merge_sensitive_values(existing, &content)?
+      } else {
+        content
+      };
+      let mut warnings = Vec::new();
+      if before
+        .as_deref()
+        .map(toml_patch::contains_sensitive_keys)
+        .unwrap_or(false)
+      {
+        warnings.push("Sensitive values preserved on save.".to_string());
+      }
+      let _: toml::Value = merged.parse()?;
+      Ok(ChangePlan {
+        operation: "save_user_config".to_string(),
+        files: vec![FileChange {
+          path,
+          before,
+          after: Some(merged),
+          redact: true,
+        }],
+        warnings,
+        validate_config: false,
+      })
+    }
+    ChangeRequest::DeleteUserConfig { name } => {
+      let paths = AppPaths::from_app(app)?;
+      let path = user_config_path(&paths, &name)?;
+      if !path.exists() {
+        return Err(AppError::new("config_missing", "Saved config not found"));
+      }
+      let before = fs::read_text_file(&path)?;
+      Ok(ChangePlan {
+        operation: "delete_user_config".to_string(),
+        files: vec![FileChange {
+          path,
+          before: Some(before),
+          after: None,
+          redact: true,
         }],
         warnings: Vec::new(),
         validate_config: false,
@@ -350,10 +433,16 @@ fn build_change_plan(
           Some(backup_path) => Some(fs::read_text_file(Path::new(backup_path))?),
           None => None,
         };
-        if target.file_name().and_then(|name| name.to_str()) == Some("config.toml") {
+        let redact = should_redact_toml(&target, &paths.user_configs_dir());
+        if redact && target.file_name().and_then(|name| name.to_str()) == Some("config.toml") {
           validate_config = true;
         }
-        files.push(FileChange { path: target, before, after });
+        files.push(FileChange {
+          path: target,
+          before,
+          after,
+          redact,
+        });
       }
       Ok(ChangePlan {
         operation: format!("restore_backup:{}", backup_id),
@@ -393,12 +482,7 @@ fn build_plan_diff(plan: &ChangePlan) -> AppResult<String> {
   for file in &plan.files {
     let before = file.before.as_deref().unwrap_or("");
     let after = file.after.as_deref().unwrap_or("");
-    let (before_text, after_text) = if file
-      .path
-      .file_name()
-      .and_then(|name| name.to_str())
-      == Some("config.toml")
-    {
+    let (before_text, after_text) = if file.redact {
       (
         toml_patch::redact_toml(before)?,
         toml_patch::redact_toml(after)?,
@@ -445,6 +529,20 @@ fn ensure_config_exists(path: &Path) -> AppResult<()> {
   Ok(())
 }
 
+fn user_config_path(paths: &AppPaths, name: &str) -> AppResult<PathBuf> {
+  let slug = sanitize_config_name(name)?;
+  Ok(paths.user_configs_dir().join(format!("{}.toml", slug)))
+}
+
+fn should_redact_toml(path: &Path, user_configs_dir: &Path) -> bool {
+  let is_config = path
+    .file_name()
+    .and_then(|name| name.to_str())
+    .map(|name| name.eq_ignore_ascii_case("config.toml"))
+    .unwrap_or(false);
+  is_config || path.starts_with(user_configs_dir)
+}
+
 fn is_allowed_skill_path(settings: &Settings, path: &Path) -> bool {
   if let Ok(codex_home) = resolve_codex_home(settings) {
     let user_root = user_skills_root(&codex_home);
@@ -479,6 +577,7 @@ fn single_file_plan(
   before: String,
   after: String,
   validate_config: bool,
+  redact: bool,
 ) -> ChangePlan {
   ChangePlan {
     operation: operation.to_string(),
@@ -486,6 +585,7 @@ fn single_file_plan(
       path,
       before: Some(before),
       after: Some(after),
+      redact,
     }],
     warnings: Vec::new(),
     validate_config,

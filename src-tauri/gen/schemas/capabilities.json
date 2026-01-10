@@ -1,1 +1,1 @@
-{}
+{"main":{"identifier":"main","description":"Default permissions for the main window.","local":true,"windows":["*"],"permissions":["core:default","opener:default"]}}
