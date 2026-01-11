@@ -69,13 +69,26 @@ All writes follow the same safety rails:
 ### Common actions
 - Dashboard: view health and diagnostics, load config quickly.
 - Config: edit root scalar keys or the raw TOML with diff preview.
+- Public Config Library: apply curated public configs (diff + backup).
+- My Configs: save your own presets (stored in app data) and apply them to config.
 - MCP Servers: toggle enabled, add/update server tables.
 - Skills: view user and repo skills, edit SKILL.md, create or delete skills.
 - Backups: review and restore from snapshots.
 
+### Managing public presets
+Public presets live in `src/features/config/data/publicConfigs.ts`. Add new entries there to
+ship more curated configs in the Public Config Library.
+
+### My Configs storage
+User-created presets are stored in the app data directory under `user-configs/`.
+
 ## Project structure
 - `src-tauri/` Rust backend (file ops, diffing, backups, TOML patching)
 - `src/` React frontend
+  - `features/` feature-first UI modules
+  - `components/` shared UI primitives
+  - `layouts/` app shell + chrome
+  - `store/` shared state + backend actions
 
 ## Notes
 - Secrets are redacted in previews and UI. Raw edits preserve sensitive values.

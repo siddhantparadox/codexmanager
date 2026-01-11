@@ -129,6 +129,9 @@ body::before {
   letter-spacing: 0.02em;
   cursor: pointer;
   transition: all 0.2s ease;
+  display: block;
+  color: inherit;
+  text-decoration: none;
 }
 
 .nav-item:hover {
@@ -162,6 +165,8 @@ body::before {
   cursor: pointer;
   transition: all 0.2s ease;
   color: rgba(15, 26, 23, 0.78);
+  display: block;
+  text-decoration: none;
 }
 
 .subnav-item:hover {
