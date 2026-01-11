@@ -26,7 +26,7 @@ The app may maintain an internal **cache/index**, but never as canonical truth.
 
 ## 3) Safety requirements (must-follow)
 ### 3.1 File edits
-- Always do **backup → diff preview → atomic write → re-validate**.
+- Always do **backup -> diff preview -> atomic write -> re-validate**.
 - Preserve unknown keys.
 - Avoid rewriting whole TOML files when a targeted patch will do.
 - Keep TOML structural constraints intact (root keys before tables).
@@ -53,11 +53,12 @@ The app may maintain an internal **cache/index**, but never as canonical truth.
   - `models/` typed structs for config/mcp/skills/prompts/rules
   - `toml_edit/` round-trip safe config patching
   - `commands.rs` Tauri commands exposed to frontend
-- `src/` — frontend
-  - `pages/` top-level screens
+- `src/` - frontend
+  - `features/` feature-first UI modules
   - `components/` reusable UI
+  - `layouts/` app shell + chrome
   - `store/` state management
-  - `lib/api.ts` typed wrappers around Tauri commands
+  - `lib/` typed wrappers and shared utilities
 
 ---
 
@@ -76,6 +77,8 @@ The app may maintain an internal **cache/index**, but never as canonical truth.
 - Use schema-based form validation.
 - Always show a diff preview before applying changes.
 - Never store secrets in frontend state longer than necessary.
+- Prefer modular, feature-based structure over monolithic files.
+- Keep `App.tsx` thin; route to feature pages and compose shared UI from `components/`.
 
 ---
 
@@ -89,8 +92,8 @@ When asked to implement something:
    - Identify the file(s)/folders affected.
 
 3) **Design UX and backend flow**
-   - Read → validate → render
-   - Edit → diff → backup → atomic write → re-validate
+   - Read -> validate -> render
+   - Edit -> diff -> backup -> atomic write -> re-validate
 
 4) **Update the data model**
    - Add typed structs for the new artifact.
@@ -178,4 +181,3 @@ Include in PR description:
 - How is it backed up/restored?
 - Any security implications?
 - Tests added/updated
-
