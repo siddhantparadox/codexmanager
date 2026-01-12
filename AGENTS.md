@@ -37,11 +37,6 @@ The app may maintain an internal **cache/index**, but never as canonical truth.
 - Always show the exact command that will run.
 - Enforce timeouts; capture stdout/stderr.
 
-### 3.3 Secrets
-- Never print tokens or auth file contents.
-- When showing token configuration, show **only the env var name**, not its value.
-- Mask sensitive strings in logs and UI.
-
 ---
 
 ## 4) Repo structure (recommended)
