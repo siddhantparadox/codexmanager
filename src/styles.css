@@ -499,6 +499,30 @@ body::before {
   margin: 0 0 8px;
 }
 
+.folder-toggle {
+  width: 100%;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 0;
+  border: none;
+  background: transparent;
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  color: rgba(15, 26, 23, 0.6);
+  cursor: pointer;
+}
+
+.folder-toggle:hover {
+  color: rgba(15, 26, 23, 0.85);
+}
+
+.folder-caret {
+  font-size: 12px;
+}
+
 .file-group-count {
   font-size: 10px;
   background: var(--panel);

@@ -20,13 +20,17 @@ description: Short description
 Describe behavior here.
 `;
 
-const FILE_GROUPS = [
-  { key: "skill_md", label: "SKILL.md" },
-  { key: "references", label: "References" },
-  { key: "scripts", label: "Scripts" },
-  { key: "assets", label: "Assets" },
-  { key: "other", label: "Other files" }
+const FOLDER_GROUPS = [
+  { key: "scripts", label: "scripts/" },
+  { key: "references", label: "references/" },
+  { key: "assets", label: "assets/" }
 ] as const;
+
+const FOLDER_ALIASES: Record<string, string[]> = {
+  scripts: ["scripts", "script"],
+  references: ["references", "reference"],
+  assets: ["assets", "asset"]
+};
 
 const TEXT_EXTENSIONS = new Set([
   "md",
@@ -92,24 +96,29 @@ function isTextFile(path: string) {
   return TEXT_EXTENSIONS.has(ext);
 }
 
-function groupSkillFiles(files: SkillFileEntry[]) {
-  const byCategory = new Map<string, SkillFileEntry[]>();
-  for (const file of files) {
-    if (file.kind !== "file") {
-      continue;
-    }
-    const list = byCategory.get(file.category) ?? [];
-    list.push(file);
-    byCategory.set(file.category, list);
-  }
-  for (const group of byCategory.values()) {
-    group.sort((a, b) => a.relative_path.localeCompare(b.relative_path));
-  }
-  return FILE_GROUPS.map((group) => ({
-    label: group.label,
-    key: group.key,
-    items: byCategory.get(group.key) ?? []
-  }));
+function buildFolderGroups(files: SkillFileEntry[]) {
+  const dirEntries = files.filter((file) => file.kind === "dir");
+  const otherItems = files
+    .filter((file) => file.kind === "file" && file.category === "other")
+    .sort((a, b) => a.relative_path.localeCompare(b.relative_path));
+  const groups = FOLDER_GROUPS.map((group) => {
+    const items = files
+      .filter((file) => file.kind === "file" && file.category === group.key)
+      .sort((a, b) => a.relative_path.localeCompare(b.relative_path));
+    const aliases = FOLDER_ALIASES[group.key] ?? [group.key];
+    const present =
+      items.length > 0 ||
+      dirEntries.some(
+        (dir) => aliases.includes(dir.relative_path.split("/")[0]?.toLowerCase() ?? "")
+      );
+    return { ...group, items, present };
+  });
+  return groups.concat({
+    key: "other",
+    label: "other files/",
+    items: otherItems,
+    present: otherItems.length > 0
+  });
 }
 
 export default function SkillsPage() {
@@ -121,6 +130,11 @@ export default function SkillsPage() {
   const [fileNotice, setFileNotice] = useState<string | null>(null);
   const [query, setQuery] = useState("");
   const [scopeFilter, setScopeFilter] = useState<"all" | "user" | "repo">("all");
+  const [expandedFolders, setExpandedFolders] = useState<Record<string, boolean>>({
+    scripts: true,
+    references: true,
+    assets: true
+  });
   const [newSkill, setNewSkill] = useState<SkillDraft>({
     name: "",
     scope: "user",
@@ -128,8 +142,18 @@ export default function SkillsPage() {
     content: NEW_SKILL_TEMPLATE
   });
 
-  const groupedFiles = useMemo(() => groupSkillFiles(skillFiles), [skillFiles]);
-  const hasFiles = groupedFiles.some((group) => group.items.length > 0);
+  const folderGroups = useMemo(() => buildFolderGroups(skillFiles), [skillFiles]);
+  const skillMdFile = useMemo(
+    () =>
+      skillFiles.find(
+        (file) =>
+          file.kind === "file" &&
+          file.category === "skill_md" &&
+          file.relative_path.toLowerCase().endsWith("skill.md")
+      ) ?? null,
+    [skillFiles]
+  );
+  const hasFiles = !!skillMdFile || folderGroups.some((group) => group.present);
   const canEditFile =
     !!activeFile && activeFile.kind === "file" && isTextFile(activeFile.relative_path);
 
@@ -146,6 +170,10 @@ export default function SkillsPage() {
       return haystack.includes(search);
     });
   }, [scan, query, scopeFilter]);
+
+  function toggleFolder(key: string) {
+    setExpandedFolders((prev) => ({ ...prev, [key]: !prev[key] }));
+  }
 
   async function loadSkillFile(file: SkillFileEntry | null, withBusy = true) {
     setSkillText("");
@@ -294,39 +322,94 @@ export default function SkillsPage() {
               </p>
               <div className="file-browser">
                 {hasFiles ? (
-                  groupedFiles.map((group) =>
-                    group.items.length > 0 ? (
-                      <div className="file-group" key={group.key}>
+                  <>
+                    {skillMdFile ? (
+                      <div className="file-group">
                         <div className="file-group-title">
-                          {group.label}
-                          <span className="file-group-count">{group.items.length}</span>
+                          SKILL.md
+                          <span className="file-group-count">1</span>
                         </div>
                         <div className="file-list">
-                          {group.items.map((file) => {
-                            const readable = isTextFile(file.relative_path);
-                            const sizeLabel = file.size ? `${file.size} bytes` : "size unknown";
-                            return (
-                              <button
-                                key={file.path}
-                                className={`file-item ${
-                                  activeFile?.path === file.path ? "active" : ""
-                                }`}
-                                onClick={() => handleFileSelect(file)}
-                              >
-                                <div>
-                                  <p className="file-item-name">{file.relative_path}</p>
-                                  <p className="file-item-meta">
-                                    {readable ? "Text" : "Binary"} · {sizeLabel}
-                                  </p>
-                                </div>
-                                <span className="file-item-tag">{readable ? "Edit" : "View"}</span>
-                              </button>
-                            );
-                          })}
+                          <button
+                            className={`file-item ${
+                              activeFile?.path === skillMdFile.path ? "active" : ""
+                            }`}
+                            onClick={() => handleFileSelect(skillMdFile)}
+                          >
+                            <div>
+                              <p className="file-item-name">SKILL.md</p>
+                              <p className="file-item-meta">
+                                Text · {skillMdFile.size ? `${skillMdFile.size} bytes` : "size unknown"}
+                              </p>
+                            </div>
+                            <span className="file-item-tag">Edit</span>
+                          </button>
                         </div>
                       </div>
-                    ) : null
-                  )
+                    ) : null}
+                    {folderGroups
+                      .filter((group) => group.present)
+                      .map((group) => (
+                        <div className="file-group" key={group.key}>
+                          <button
+                            className="folder-toggle"
+                            type="button"
+                            onClick={() => toggleFolder(group.key)}
+                          >
+                            <span>{group.label}</span>
+                            <span className="file-group-count">{group.items.length}</span>
+                            <span className="folder-caret">
+                              {expandedFolders[group.key] ? "▾" : "▸"}
+                            </span>
+                          </button>
+                          {expandedFolders[group.key] ? (
+                            <div className="file-list">
+                              {group.items.length === 0 ? (
+                                <p className="ghost">No files in this folder.</p>
+                              ) : (
+                                group.items.map((file) => {
+                                  const readable = isTextFile(file.relative_path);
+                                  const sizeLabel = file.size
+                                    ? `${file.size} bytes`
+                                    : "size unknown";
+                                  const aliases = FOLDER_ALIASES[group.key] ?? [group.key];
+                                  const matchedAlias =
+                                    aliases.length > 0
+                                      ? aliases.find((alias) =>
+                                          file.relative_path
+                                            .toLowerCase()
+                                            .startsWith(`${alias}/`)
+                                        )
+                                      : null;
+                                  const displayName = matchedAlias
+                                    ? file.relative_path.slice(matchedAlias.length + 1)
+                                    : file.relative_path;
+                                  return (
+                                    <button
+                                      key={file.path}
+                                      className={`file-item ${
+                                        activeFile?.path === file.path ? "active" : ""
+                                      }`}
+                                      onClick={() => handleFileSelect(file)}
+                                    >
+                                      <div>
+                                        <p className="file-item-name">{displayName}</p>
+                                        <p className="file-item-meta">
+                                          {readable ? "Text" : "Binary"} · {sizeLabel}
+                                        </p>
+                                      </div>
+                                      <span className="file-item-tag">
+                                        {readable ? "Edit" : "View"}
+                                      </span>
+                                    </button>
+                                  );
+                                })
+                              )}
+                            </div>
+                          ) : null}
+                        </div>
+                      ))}
+                  </>
                 ) : (
                   <p className="ghost">No files found in this skill.</p>
                 )}

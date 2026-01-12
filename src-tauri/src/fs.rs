@@ -482,9 +482,9 @@ fn classify_skill_path(rel: &Path) -> String {
   let mut components = rel.components();
   let first = components.next().and_then(|comp| comp.as_os_str().to_str());
   match first {
-    Some("references") => "references".to_string(),
-    Some("scripts") => "scripts".to_string(),
-    Some("assets") => "assets".to_string(),
+    Some("references") | Some("reference") => "references".to_string(),
+    Some("scripts") | Some("script") => "scripts".to_string(),
+    Some("assets") | Some("asset") => "assets".to_string(),
     _ => "other".to_string(),
   }
 }
