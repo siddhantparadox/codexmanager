@@ -1,4 +1,4 @@
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { listSkillFiles, readSkillText } from "../../lib/api";
 import { normalizeError } from "../../lib/errors";
 import type { SkillFileCounts, SkillFileEntry, SkillSummary } from "../../lib/types";
@@ -9,6 +9,11 @@ type SkillDraft = {
   scope: "user" | "repo";
   repo_root: string;
   content: string;
+  folders: {
+    scripts: { enabled: boolean; files: string[] };
+    references: { enabled: boolean; files: string[] };
+    assets: { enabled: boolean; files: string[] };
+  };
 };
 
 const NEW_SKILL_TEMPLATE = `---
@@ -135,18 +140,44 @@ export default function SkillsPage() {
   const [activeFile, setActiveFile] = useState<SkillFileEntry | null>(null);
   const [fileNotice, setFileNotice] = useState<string | null>(null);
   const [query, setQuery] = useState("");
-  const [scopeFilter, setScopeFilter] = useState<"all" | "user" | "repo">("all");
   const [expandedFolders, setExpandedFolders] = useState<Record<string, boolean>>({
     scripts: true,
     references: true,
-    assets: true
+    assets: true,
+    other: true
   });
   const [newSkill, setNewSkill] = useState<SkillDraft>({
     name: "",
     scope: "user",
     repo_root: "",
-    content: NEW_SKILL_TEMPLATE
+    content: NEW_SKILL_TEMPLATE,
+    folders: {
+      scripts: { enabled: true, files: [] },
+      references: { enabled: true, files: [] },
+      assets: { enabled: true, files: [] }
+    }
   });
+  const [createNotice, setCreateNotice] = useState<string | null>(null);
+  const [newFileFolder, setNewFileFolder] = useState<keyof SkillDraft["folders"]>("scripts");
+  const [newFileName, setNewFileName] = useState("");
+
+  const enabledCreateFolders = useMemo(
+    () =>
+      (["scripts", "references", "assets"] as const).filter(
+        (folder) => newSkill.folders[folder].enabled
+      ),
+    [newSkill.folders]
+  );
+  const hasEnabledFolders = enabledCreateFolders.length > 0;
+
+  useEffect(() => {
+    if (!hasEnabledFolders) {
+      return;
+    }
+    if (!enabledCreateFolders.includes(newFileFolder)) {
+      setNewFileFolder(enabledCreateFolders[0]);
+    }
+  }, [enabledCreateFolders, hasEnabledFolders, newFileFolder]);
 
   const folderGroups = useMemo(() => buildFolderGroups(skillFiles), [skillFiles]);
   const skillMdFile = useMemo(
@@ -166,19 +197,74 @@ export default function SkillsPage() {
   const filteredSkills = useMemo(() => {
     const search = query.trim().toLowerCase();
     return (scan?.skills ?? []).filter((skill) => {
-      if (scopeFilter !== "all" && skill.scope !== scopeFilter) {
-        return false;
-      }
       if (!search) {
         return true;
       }
-      const haystack = `${skill.name} ${skill.description ?? ""} ${skill.dir}`.toLowerCase();
+      const haystack = `${skill.name} ${skill.dir}`.toLowerCase();
       return haystack.includes(search);
     });
-  }, [scan, query, scopeFilter]);
+  }, [scan, query]);
 
   function toggleFolder(key: string) {
     setExpandedFolders((prev) => ({ ...prev, [key]: !prev[key] }));
+  }
+
+  function toggleNewFolder(key: keyof SkillDraft["folders"]) {
+    setNewSkill((prev) => ({
+      ...prev,
+      folders: {
+        ...prev.folders,
+        [key]: {
+          ...prev.folders[key],
+          enabled: !prev.folders[key].enabled
+        }
+      }
+    }));
+  }
+
+  function addFolderFile(key: keyof SkillDraft["folders"]) {
+    if (!newSkill.folders[key].enabled) {
+      return;
+    }
+    const value = newFileName.trim();
+    if (!value) {
+      return;
+    }
+    if (value.includes("/") || value.includes("\\") || value.includes("..")) {
+      setCreateNotice("Use file names only (no paths).");
+      return;
+    }
+    setCreateNotice(null);
+    setNewSkill((prev) => {
+      const files = prev.folders[key].files;
+      if (files.includes(value)) {
+        return prev;
+      }
+      return {
+        ...prev,
+        folders: {
+          ...prev.folders,
+          [key]: {
+            ...prev.folders[key],
+            files: [...files, value]
+          }
+        }
+      };
+    });
+    setNewFileName("");
+  }
+
+  function removeFolderFile(key: keyof SkillDraft["folders"], name: string) {
+    setNewSkill((prev) => ({
+      ...prev,
+      folders: {
+        ...prev.folders,
+        [key]: {
+          ...prev.folders[key],
+          files: prev.folders[key].files.filter((file) => file !== name)
+        }
+      }
+    }));
   }
 
   async function loadSkillFile(file: SkillFileEntry | null, withBusy = true) {
@@ -261,16 +347,8 @@ export default function SkillsPage() {
             <input
               value={query}
               onChange={(event) => setQuery(event.target.value)}
-              placeholder="Search by name, description, or path"
+              placeholder="Search by name or path"
             />
-            <select
-              value={scopeFilter}
-              onChange={(event) => setScopeFilter(event.target.value as typeof scopeFilter)}
-            >
-              <option value="all">All scopes</option>
-              <option value="user">User</option>
-              <option value="repo">Repo</option>
-            </select>
           </div>
         </div>
         <div className="panel-body scroll">
@@ -492,7 +570,7 @@ export default function SkillsPage() {
           <span className="panel-meta">Templates are editable</span>
         </div>
         <div className="panel-body scroll">
-          <div className="form-grid">
+          <div className="form-grid compact">
             <label>
               Name
               <input
@@ -521,6 +599,91 @@ export default function SkillsPage() {
                 <option value="repo">Repo</option>
               </select>
             </label>
+            <div className="span-2 folder-options">
+              <div className="structure-row">
+                <span className="field-label">Structure</span>
+                <div className="structure-toggles">
+                  {(["scripts", "references", "assets"] as const).map((folder) => (
+                    <label
+                      className={`toggle-pill ${newSkill.folders[folder].enabled ? "active" : ""}`}
+                      key={folder}
+                    >
+                      <input
+                        type="checkbox"
+                        checked={newSkill.folders[folder].enabled}
+                        onChange={() => toggleNewFolder(folder)}
+                      />
+                      {folder}/
+                    </label>
+                  ))}
+                </div>
+              </div>
+              <div className="structure-add">
+                <select
+                  value={hasEnabledFolders ? newFileFolder : ""}
+                  onChange={(event) =>
+                    setNewFileFolder(event.target.value as keyof SkillDraft["folders"])
+                  }
+                  disabled={!hasEnabledFolders}
+                >
+                  {hasEnabledFolders ? (
+                    enabledCreateFolders.map((folder) => (
+                      <option key={folder} value={folder}>
+                        {folder}/
+                      </option>
+                    ))
+                  ) : (
+                    <option value="">Enable a folder</option>
+                  )}
+                </select>
+                <input
+                  value={newFileName}
+                  onChange={(event) => setNewFileName(event.target.value)}
+                  placeholder="Add file (e.g. notes.md)"
+                  onKeyDown={(event) => {
+                    if (event.key === "Enter") {
+                      event.preventDefault();
+                      addFolderFile(newFileFolder);
+                    }
+                  }}
+                  disabled={!hasEnabledFolders}
+                />
+                <button
+                  type="button"
+                  className="ghost-button"
+                  onClick={() => addFolderFile(newFileFolder)}
+                  disabled={!hasEnabledFolders}
+                >
+                  Add
+                </button>
+                {!hasEnabledFolders ? (
+                  <span className="row-meta">Enable a folder to add files.</span>
+                ) : null}
+              </div>
+              <div className="structure-files">
+                {(["scripts", "references", "assets"] as const)
+                  .filter(
+                    (folder) =>
+                      newSkill.folders[folder].enabled && newSkill.folders[folder].files.length > 0
+                  )
+                  .map((folder) => (
+                    <div className="file-row" key={folder}>
+                      <span className="file-folder">{folder}/</span>
+                      <div className="file-chips">
+                        {newSkill.folders[folder].files.map((file) => (
+                          <span key={file} className="chip">
+                            {file}
+                            <button type="button" onClick={() => removeFolderFile(folder, file)}>
+                              ×
+                            </button>
+                          </span>
+                        ))}
+                      </div>
+                    </div>
+                  ))}
+              </div>
+              {createNotice ? <p className="row-meta">{createNotice}</p> : null}
+            </div>
             {newSkill.scope === "repo" ? (
               <label className="span-2">
                 Repo root
@@ -560,7 +723,21 @@ export default function SkillsPage() {
                   scope: newSkill.scope,
                   repo_root: newSkill.repo_root || null,
                   name: newSkill.name,
-                  content: newSkill.content
+                  content: newSkill.content,
+                  folders: {
+                    scripts: {
+                      enabled: newSkill.folders.scripts.enabled,
+                      files: newSkill.folders.scripts.files
+                    },
+                    references: {
+                      enabled: newSkill.folders.references.enabled,
+                      files: newSkill.folders.references.files
+                    },
+                    assets: {
+                      enabled: newSkill.folders.assets.enabled,
+                      files: newSkill.folders.assets.files
+                    }
+                  }
                 })
               }
               disabled={!newSkill.name.trim()}

@@ -111,6 +111,38 @@ pub struct ConfigText {
   pub redacted: bool,
 }
 
+#[derive(Debug, Serialize, Deserialize, Clone)]
+pub struct SkillFolderSpec {
+  pub enabled: bool,
+  pub files: Vec<String>,
+}
+
+impl Default for SkillFolderSpec {
+  fn default() -> Self {
+    Self {
+      enabled: true,
+      files: Vec::new(),
+    }
+  }
+}
+
+#[derive(Debug, Serialize, Deserialize, Clone)]
+pub struct SkillFolderConfig {
+  pub scripts: SkillFolderSpec,
+  pub references: SkillFolderSpec,
+  pub assets: SkillFolderSpec,
+}
+
+impl Default for SkillFolderConfig {
+  fn default() -> Self {
+    Self {
+      scripts: SkillFolderSpec::default(),
+      references: SkillFolderSpec::default(),
+      assets: SkillFolderSpec::default(),
+    }
+  }
+}
+
 #[derive(Debug, Serialize, Deserialize)]
 #[serde(tag = "type", rename_all = "snake_case")]
 pub enum ChangeRequest {
@@ -124,6 +156,8 @@ pub enum ChangeRequest {
     repo_root: Option<String>,
     name: String,
     content: String,
+    #[serde(default)]
+    folders: SkillFolderConfig,
   },
   UpdateSkill { path: String, content: String },
   DeleteSkill { path: String },

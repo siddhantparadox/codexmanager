@@ -107,6 +107,17 @@ export type ScalarValue = {
   value: string | number | boolean;
 };
 
+export type SkillFolderSpec = {
+  enabled: boolean;
+  files: string[];
+};
+
+export type SkillFolderConfig = {
+  scripts: SkillFolderSpec;
+  references: SkillFolderSpec;
+  assets: SkillFolderSpec;
+};
+
 export type ChangeRequest =
   | { type: "toggle_mcp_server"; name: string; enabled: boolean }
   | { type: "set_config_scalar"; key: string; value: ScalarValue }
@@ -119,6 +130,7 @@ export type ChangeRequest =
       repo_root?: string | null;
       name: string;
       content: string;
+      folders: SkillFolderConfig;
     }
   | { type: "update_skill"; path: string; content: string }
   | { type: "delete_skill"; path: string }

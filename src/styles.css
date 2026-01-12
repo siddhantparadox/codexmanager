@@ -731,6 +731,18 @@ body::before {
   gap: 16px;
 }
 
+.form-grid.compact {
+  gap: 12px;
+}
+
+.form-grid.compact label {
+  gap: 4px;
+}
+
+.form-grid.compact textarea {
+  min-height: 110px;
+}
+
 .form-grid label {
   display: flex;
   flex-direction: column;
@@ -739,6 +751,162 @@ body::before {
   text-transform: uppercase;
   letter-spacing: 0.08em;
 }
+
+.field-label {
+  display: block;
+  font-size: 12px;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  margin-bottom: 8px;
+}
+
+.checkbox-field {
+  flex-direction: row;
+  align-items: center;
+  gap: 10px;
+  text-transform: none;
+  letter-spacing: 0.02em;
+}
+
+.checkbox-field input {
+  margin: 0;
+}
+
+.folder-options {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 10px 12px;
+  border-radius: 12px;
+  border: 1px solid var(--line);
+  background: var(--panel-2);
+}
+
+.structure-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+
+.structure-row .field-label {
+  margin-bottom: 0;
+}
+
+.structure-toggles {
+  display: flex;
+  gap: 6px;
+  flex-wrap: wrap;
+}
+
+.toggle-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 4px 10px;
+  border-radius: 999px;
+  border: 1px solid var(--line);
+  background: var(--panel);
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  cursor: pointer;
+}
+
+.toggle-pill input {
+  margin: 0;
+  accent-color: var(--accent-2);
+}
+
+.toggle-pill.active {
+  border-color: rgba(31, 79, 63, 0.4);
+  background: rgba(31, 79, 63, 0.12);
+  color: var(--accent-2);
+}
+
+.structure-add {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.structure-add select {
+  min-width: 130px;
+}
+
+.structure-add input {
+  flex: 1 1 220px;
+  min-width: 180px;
+}
+
+.structure-add .row-meta {
+  flex-basis: 100%;
+  margin: 0;
+}
+
+.structure-files {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.file-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.file-folder {
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  color: rgba(15, 26, 23, 0.6);
+}
+
+.file-chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 4px 8px;
+  border-radius: 999px;
+  border: 1px solid var(--line);
+  background: var(--panel);
+  font-size: 11px;
+}
+
+.chip button {
+  border: none;
+  background: transparent;
+  cursor: pointer;
+  font-size: 12px;
+  line-height: 1;
+  color: rgba(15, 26, 23, 0.6);
+}
+
+.chip button:hover {
+  color: rgba(15, 26, 23, 0.9);
+}
+
+.ghost-button.small {
+  padding: 6px 10px;
+  font-size: 11px;
+  border-radius: 999px;
+}
+
+.structure-files .file-row + .file-row {
+  padding-top: 4px;
+  border-top: 1px dashed rgba(15, 26, 23, 0.08);
+}
+
 
 .form-grid input,
 .form-grid textarea,

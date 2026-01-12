@@ -8,7 +8,7 @@ use crate::errors::{AppError, AppResult};
 use crate::fs;
 use crate::models::{
   ApplyResult, ChangeRequest, ConfigText, Diagnostic, PreviewFile, PreviewResult, ScanState,
-  Settings, SkillFileEntry, SkillScope, UserConfigSummary,
+  Settings, SkillFileEntry, SkillFolderSpec, SkillScope, UserConfigSummary,
 };
 use crate::paths::{
   config_path, is_within_root, repo_skills_root, resolve_codex_home, sanitize_config_name,
@@ -188,6 +188,7 @@ pub fn apply_change(
   let apply_result = apply_plan(&plan);
   if let Err(error) = apply_result {
     let _ = fs::restore_backup(&paths.backups_dir(), &backup.id);
+    cleanup_created_dirs(&plan.create_dirs);
     return Err(error);
   }
 
@@ -197,6 +198,7 @@ pub fn apply_change(
     let parse_result: Result<toml::Value, _> = text.parse();
     if let Err(error) = parse_result {
       let _ = fs::restore_backup(&paths.backups_dir(), &backup.id);
+      cleanup_created_dirs(&plan.create_dirs);
       return Err(AppError::new("toml_parse", error.to_string()));
     }
   }
@@ -218,6 +220,7 @@ struct ChangePlan {
   files: Vec<FileChange>,
   warnings: Vec<String>,
   validate_config: bool,
+  create_dirs: Vec<PathBuf>,
   remove_dirs: Vec<PathBuf>,
 }
 
@@ -295,6 +298,7 @@ fn build_change_plan(
         }],
         warnings,
         validate_config: true,
+        create_dirs: Vec::new(),
         remove_dirs: Vec::new(),
       })
     }
@@ -329,24 +333,56 @@ fn build_change_plan(
       repo_root,
       name,
       content,
+      folders,
     } => {
       let path = build_skill_path(settings, &codex_home, &scope, repo_root, &name)?;
+      let skill_dir = path.parent().map(|dir| dir.to_path_buf());
       let before = if path.exists() {
         Some(fs::read_text_file(&path)?)
       } else {
         None
       };
-      Ok(ChangePlan {
-        operation: "create_skill".to_string(),
-        files: vec![FileChange {
+      let mut warnings = Vec::new();
+      let mut create_dirs = Vec::new();
+      let mut files = vec![FileChange {
           path,
           before,
           after: Some(content),
           redact: false,
           binary: false,
-        }],
-        warnings: Vec::new(),
+        }];
+      if let Some(skill_dir) = skill_dir.as_ref() {
+        append_folder_plan(
+          skill_dir,
+          "scripts",
+          &folders.scripts,
+          &mut files,
+          &mut create_dirs,
+          &mut warnings,
+        )?;
+        append_folder_plan(
+          skill_dir,
+          "references",
+          &folders.references,
+          &mut files,
+          &mut create_dirs,
+          &mut warnings,
+        )?;
+        append_folder_plan(
+          skill_dir,
+          "assets",
+          &folders.assets,
+          &mut files,
+          &mut create_dirs,
+          &mut warnings,
+        )?;
+      }
+      Ok(ChangePlan {
+        operation: "create_skill".to_string(),
+        files,
+        warnings,
         validate_config: false,
+        create_dirs,
         remove_dirs: Vec::new(),
       })
     }
@@ -367,6 +403,7 @@ fn build_change_plan(
         }],
         warnings: Vec::new(),
         validate_config: false,
+        create_dirs: Vec::new(),
         remove_dirs: Vec::new(),
       })
     }
@@ -374,6 +411,22 @@ fn build_change_plan(
       let path = PathBuf::from(path);
       if !is_allowed_skill_path(settings, &path) {
         return Err(AppError::new("path_denied", "Skill path not allowed"));
+      }
+      if !path.exists() {
+        return Ok(ChangePlan {
+          operation: "delete_skill".to_string(),
+          files: vec![FileChange {
+            path,
+            before: None,
+            after: None,
+            redact: false,
+            binary: false,
+          }],
+          warnings: vec!["File not found; nothing to delete.".to_string()],
+          validate_config: false,
+          create_dirs: Vec::new(),
+          remove_dirs: Vec::new(),
+        });
       }
       let (before, binary) = read_text_or_binary(&path)?;
       Ok(ChangePlan {
@@ -387,6 +440,7 @@ fn build_change_plan(
         }],
         warnings: Vec::new(),
         validate_config: false,
+        create_dirs: Vec::new(),
         remove_dirs: Vec::new(),
       })
     }
@@ -420,6 +474,7 @@ fn build_change_plan(
         files,
         warnings: Vec::new(),
         validate_config: false,
+        create_dirs: Vec::new(),
         remove_dirs: vec![path],
       })
     }
@@ -456,6 +511,7 @@ fn build_change_plan(
         }],
         warnings,
         validate_config: false,
+        create_dirs: Vec::new(),
         remove_dirs: Vec::new(),
       })
     }
@@ -477,6 +533,7 @@ fn build_change_plan(
         }],
         warnings: Vec::new(),
         validate_config: false,
+        create_dirs: Vec::new(),
         remove_dirs: Vec::new(),
       })
     }
@@ -514,6 +571,7 @@ fn build_change_plan(
         files,
         warnings: Vec::new(),
         validate_config,
+        create_dirs: Vec::new(),
         remove_dirs: Vec::new(),
       })
     }
@@ -569,6 +627,70 @@ fn collect_skill_files(dir: &Path) -> AppResult<Vec<PathBuf>> {
   Ok(files)
 }
 
+fn validate_skill_file_name(name: &str) -> AppResult<String> {
+  let trimmed = name.trim();
+  if trimmed.is_empty() {
+    return Err(AppError::new("file_name", "File name cannot be empty"));
+  }
+  if trimmed.contains('/') || trimmed.contains('\\') || trimmed.contains("..") || trimmed.contains(':')
+  {
+    return Err(AppError::new("file_name", "File name must not include paths"));
+  }
+  Ok(trimmed.to_string())
+}
+
+fn append_folder_plan(
+  skill_dir: &Path,
+  folder: &str,
+  spec: &SkillFolderSpec,
+  files: &mut Vec<FileChange>,
+  create_dirs: &mut Vec<PathBuf>,
+  warnings: &mut Vec<String>,
+) -> AppResult<()> {
+  if !spec.enabled {
+    return Ok(());
+  }
+  let folder_dir = skill_dir.join(folder);
+  if !folder_dir.exists() {
+    create_dirs.push(folder_dir.clone());
+    warnings.push(format!("Will create folder: {}/", folder));
+  }
+  let mut created_files = Vec::new();
+  let mut skipped_files = Vec::new();
+  for file_name in &spec.files {
+    let safe_name = validate_skill_file_name(file_name)?;
+    let file_path = folder_dir.join(&safe_name);
+    if files.iter().any(|change| change.path == file_path) {
+      continue;
+    }
+    if file_path.exists() {
+      skipped_files.push(format!("{}/{}", folder, safe_name));
+      continue;
+    }
+    files.push(FileChange {
+      path: file_path,
+      before: None,
+      after: Some(String::new()),
+      redact: false,
+      binary: false,
+    });
+    created_files.push(format!("{}/{}", folder, safe_name));
+  }
+  if !created_files.is_empty() {
+    warnings.push(format!(
+      "Will create files: {}",
+      created_files.join(", ")
+    ));
+  }
+  if !skipped_files.is_empty() {
+    warnings.push(format!(
+      "Skipped existing files: {}",
+      skipped_files.join(", ")
+    ));
+  }
+  Ok(())
+}
+
 fn build_plan_diff(plan: &ChangePlan) -> AppResult<String> {
   let mut output = String::new();
   for file in &plan.files {
@@ -611,6 +733,9 @@ fn build_plan_diff(plan: &ChangePlan) -> AppResult<String> {
 }
 
 fn apply_plan(plan: &ChangePlan) -> AppResult<()> {
+  for dir in &plan.create_dirs {
+    std_fs::create_dir_all(dir)?;
+  }
   for file in &plan.files {
     match &file.after {
       Some(content) => {
@@ -636,6 +761,14 @@ fn ensure_config_exists(path: &Path) -> AppResult<()> {
     return Err(AppError::new("config_missing", "config.toml not found"));
   }
   Ok(())
+}
+
+fn cleanup_created_dirs(dirs: &[PathBuf]) {
+  for dir in dirs.iter().rev() {
+    if dir.exists() {
+      let _ = std_fs::remove_dir(dir);
+    }
+  }
 }
 
 fn user_config_path(paths: &AppPaths, name: &str) -> AppResult<PathBuf> {
@@ -699,6 +832,7 @@ fn single_file_plan(
     }],
     warnings: Vec::new(),
     validate_config,
+    create_dirs: Vec::new(),
     remove_dirs: Vec::new(),
   }
 }
