@@ -162,6 +162,9 @@ At minimum:
 
 Add fixtures under `src-tauri/tests/fixtures/`.
 
+Always run tests after each code modification. At minimum:
+- `cargo test --manifest-path src-tauri/Cargo.toml`
+
 ---
 
 ## 11) Common pitfalls to avoid

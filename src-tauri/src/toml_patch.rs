@@ -19,7 +19,7 @@ pub fn set_root_scalar(input: &str, key: &str, scalar: ScalarValue) -> AppResult
       doc[key] = value(inner);
     }
   }
-  Ok(doc.to_string())
+  Ok(render_doc(input, &doc))
 }
 
 pub fn set_mcp_enabled(input: &str, name: &str, enabled: bool) -> AppResult<String> {
@@ -36,7 +36,7 @@ pub fn set_mcp_enabled(input: &str, name: &str, enabled: bool) -> AppResult<Stri
     .as_table_mut()
     .ok_or_else(|| AppError::new("mcp_invalid", "MCP server is not a table"))?;
   server_table["enabled"] = value(enabled);
-  Ok(doc.to_string())
+  Ok(render_doc(input, &doc))
 }
 
 pub fn upsert_mcp_server(input: &str, name: &str, table_toml: &str) -> AppResult<String> {
@@ -60,7 +60,7 @@ pub fn upsert_mcp_server(input: &str, name: &str, table_toml: &str) -> AppResult
     .as_table_mut()
     .ok_or_else(|| AppError::new("mcp_invalid", "mcp_servers is not a table"))?;
   server_table.insert(name, new_item);
-  Ok(doc.to_string())
+  Ok(render_doc(input, &doc))
 }
 
 pub fn delete_mcp_server(input: &str, name: &str) -> AppResult<String> {
@@ -68,20 +68,20 @@ pub fn delete_mcp_server(input: &str, name: &str) -> AppResult<String> {
   if let Some(servers) = doc.get_mut("mcp_servers").and_then(Item::as_table_mut) {
     servers.remove(name);
   }
-  Ok(doc.to_string())
+  Ok(render_doc(input, &doc))
 }
 
 pub fn redact_toml(input: &str) -> AppResult<String> {
   let mut doc = parse_doc(input)?;
   redact_item(doc.as_item_mut());
-  Ok(doc.to_string())
+  Ok(render_doc(input, &doc))
 }
 
 pub fn merge_sensitive_values(current: &str, edited: &str) -> AppResult<String> {
   let current_doc = parse_doc(current)?;
   let mut edited_doc = parse_doc(edited)?;
   copy_sensitive_item(current_doc.as_item(), edited_doc.as_item_mut());
-  Ok(edited_doc.to_string())
+  Ok(render_doc(edited, &edited_doc))
 }
 
 pub fn contains_sensitive_keys(input: &str) -> bool {
@@ -94,6 +94,16 @@ pub fn contains_sensitive_keys(input: &str) -> bool {
 
 fn parse_doc(input: &str) -> AppResult<DocumentMut> {
   Ok(input.parse::<DocumentMut>()?)
+}
+
+fn render_doc(input: &str, doc: &DocumentMut) -> String {
+  let mut output = doc.to_string();
+  if !input.ends_with('\n') {
+    while output.ends_with('\n') {
+      output.pop();
+    }
+  }
+  output
 }
 
 fn redact_item(item: &mut Item) {

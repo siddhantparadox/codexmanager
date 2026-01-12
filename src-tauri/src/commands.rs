@@ -532,140 +532,16 @@ fn build_change_plan(
       if slug_trim.is_empty() {
         return Err(AppError::new("skill_slug", "Skill slug cannot be empty"));
       }
-      let mut warnings = Vec::new();
-      warnings.push(
-        "Remote package is fetched again on apply; preview may change if the registry updates."
-          .to_string(),
-      );
-      let safe_slug = sanitize_skill_name(slug_trim)?;
-      if safe_slug != slug_trim {
-        warnings.push(format!("Local folder will be named '{}'.", safe_slug));
-      }
-      let root = match scope {
-        SkillScope::User => user_skills_root(&codex_home),
-        SkillScope::Repo => {
-          let repo_root = repo_root.ok_or_else(|| {
-            AppError::new("repo_root", "Repo scope requires repo_root")
-          })?;
-          if !settings.repo_roots.contains(&repo_root) {
-            return Err(AppError::new("repo_root", "Repo root not registered"));
-          }
-          repo_skills_root(Path::new(&repo_root))
-        }
-      };
-      let target_dir = root.join(&safe_slug);
-      if !is_within_root(&root, &target_dir) {
-        return Err(AppError::new("path_denied", "Target path not allowed"));
-      }
-
       let zip_bytes = skills_registry::download_latest_zip(slug_trim)?;
-      let entries = skills_registry::extract_zip_entries(&zip_bytes)?;
-      if entries.is_empty() {
-        return Err(AppError::new("zip_empty", "No files found in skill package"));
-      }
-
-      let mut files = Vec::new();
-      let mut new_paths: HashSet<PathBuf> = HashSet::new();
-      let mut has_skill_md = false;
-
-      for entry in entries {
-        if entry
-          .path
-          .file_name()
-          .and_then(|name| name.to_str())
-          .map(|name| name.eq_ignore_ascii_case("SKILL.md"))
-          == Some(true)
-        {
-          has_skill_md = true;
-        }
-        let target_path = target_dir.join(&entry.path);
-        if new_paths.contains(&target_path) {
-          warnings.push(format!(
-            "Duplicate entry skipped: {}",
-            entry.path.to_string_lossy()
-          ));
-          continue;
-        }
-        let (before, before_binary) = if target_path.exists() {
-          read_text_or_binary(&target_path)?
-        } else {
-          (None, false)
-        };
-        let change = build_change_from_bytes(target_path.clone(), entry.bytes, before, before_binary);
-        files.push(change);
-        new_paths.insert(target_path);
-      }
-
-      if !has_skill_md {
-        warnings.push("Package does not include SKILL.md.".to_string());
-      }
-
-      let mut remove_dirs_before = Vec::new();
-      match &mode {
-        InstallMode::Overlay => {}
-        InstallMode::Replace => {
-          warnings.push(
-            "Replace mode removes the existing skill folder before install."
-              .to_string(),
-          );
-          if target_dir.exists() {
-            remove_dirs_before.push(target_dir.clone());
-          }
-          let mut deletions = Vec::new();
-          if target_dir.exists() {
-            for existing in collect_skill_files(&target_dir)? {
-              let (before, binary) = read_text_or_binary(&existing)?;
-              deletions.push(FileChange {
-                path: existing,
-                before,
-                after: None,
-                after_bytes: None,
-                redact: false,
-                binary,
-              });
-            }
-          }
-          deletions.append(&mut files);
-          files = deletions;
-        }
-        InstallMode::Sync => {
-          warnings.push(
-            "Sync mode deletes local files not present in the package."
-              .to_string(),
-          );
-          if target_dir.exists() {
-            for existing in collect_skill_files(&target_dir)? {
-              if new_paths.contains(&existing) {
-                continue;
-              }
-              let (before, binary) = read_text_or_binary(&existing)?;
-              files.push(FileChange {
-                path: existing,
-                before,
-                after: None,
-                after_bytes: None,
-                redact: false,
-                binary,
-              });
-            }
-          }
-        }
-      }
-
-      let mode_label = match mode {
-        InstallMode::Overlay => "overlay",
-        InstallMode::Replace => "replace",
-        InstallMode::Sync => "sync",
-      };
-      Ok(ChangePlan {
-        operation: format!("install_public_skill:{}:{}", safe_slug, mode_label),
-        files,
-        warnings,
-        validate_config: false,
-        create_dirs: Vec::new(),
-        remove_dirs_before,
-        remove_dirs: Vec::new(),
-      })
+      build_install_remote_skill_plan(
+        settings,
+        &codex_home,
+        slug_trim,
+        scope,
+        repo_root,
+        mode,
+        zip_bytes,
+      )
     }
     ChangeRequest::SaveUserConfig { name, content } => {
       let paths = AppPaths::from_app(app)?;
@@ -771,6 +647,147 @@ fn build_change_plan(
       })
     }
   }
+}
+
+fn build_install_remote_skill_plan(
+  settings: &Settings,
+  codex_home: &Path,
+  slug: &str,
+  scope: SkillScope,
+  repo_root: Option<String>,
+  mode: InstallMode,
+  zip_bytes: Vec<u8>,
+) -> AppResult<ChangePlan> {
+  let slug_trim = slug.trim();
+  if slug_trim.is_empty() {
+    return Err(AppError::new("skill_slug", "Skill slug cannot be empty"));
+  }
+  let mut warnings = Vec::new();
+  warnings.push(
+    "Remote package is fetched again on apply; preview may change if the registry updates."
+      .to_string(),
+  );
+  let safe_slug = sanitize_skill_name(slug_trim)?;
+  if safe_slug != slug_trim {
+    warnings.push(format!("Local folder will be named '{}'.", safe_slug));
+  }
+  let root = match scope {
+    SkillScope::User => user_skills_root(codex_home),
+    SkillScope::Repo => {
+      let repo_root = repo_root
+        .ok_or_else(|| AppError::new("repo_root", "Repo scope requires repo_root"))?;
+      if !settings.repo_roots.contains(&repo_root) {
+        return Err(AppError::new("repo_root", "Repo root not registered"));
+      }
+      repo_skills_root(Path::new(&repo_root))
+    }
+  };
+  let target_dir = root.join(&safe_slug);
+  if !is_within_root(&root, &target_dir) {
+    return Err(AppError::new("path_denied", "Target path not allowed"));
+  }
+
+  let entries = skills_registry::extract_zip_entries(&zip_bytes)?;
+  if entries.is_empty() {
+    return Err(AppError::new("zip_empty", "No files found in skill package"));
+  }
+
+  let mut files = Vec::new();
+  let mut new_paths: HashSet<PathBuf> = HashSet::new();
+  let mut has_skill_md = false;
+
+  for entry in entries {
+    if entry
+      .path
+      .file_name()
+      .and_then(|name| name.to_str())
+      .map(|name| name.eq_ignore_ascii_case("SKILL.md"))
+      == Some(true)
+    {
+      has_skill_md = true;
+    }
+    let target_path = target_dir.join(&entry.path);
+    if new_paths.contains(&target_path) {
+      warnings.push(format!(
+        "Duplicate entry skipped: {}",
+        entry.path.to_string_lossy()
+      ));
+      continue;
+    }
+    let (before, before_binary) = if target_path.exists() {
+      read_text_or_binary(&target_path)?
+    } else {
+      (None, false)
+    };
+    let change = build_change_from_bytes(target_path.clone(), entry.bytes, before, before_binary);
+    files.push(change);
+    new_paths.insert(target_path);
+  }
+
+  if !has_skill_md {
+    warnings.push("Package does not include SKILL.md.".to_string());
+  }
+
+  let mut remove_dirs_before = Vec::new();
+  match &mode {
+    InstallMode::Overlay => {}
+    InstallMode::Replace => {
+      warnings.push("Replace mode removes the existing skill folder before install.".to_string());
+      if target_dir.exists() {
+        remove_dirs_before.push(target_dir.clone());
+      }
+      let mut deletions = Vec::new();
+      if target_dir.exists() {
+        for existing in collect_skill_files(&target_dir)? {
+          let (before, binary) = read_text_or_binary(&existing)?;
+          deletions.push(FileChange {
+            path: existing,
+            before,
+            after: None,
+            after_bytes: None,
+            redact: false,
+            binary,
+          });
+        }
+      }
+      deletions.append(&mut files);
+      files = deletions;
+    }
+    InstallMode::Sync => {
+      warnings.push("Sync mode deletes local files not present in the package.".to_string());
+      if target_dir.exists() {
+        for existing in collect_skill_files(&target_dir)? {
+          if new_paths.contains(&existing) {
+            continue;
+          }
+          let (before, binary) = read_text_or_binary(&existing)?;
+          files.push(FileChange {
+            path: existing,
+            before,
+            after: None,
+            after_bytes: None,
+            redact: false,
+            binary,
+          });
+        }
+      }
+    }
+  }
+
+  let mode_label = match mode {
+    InstallMode::Overlay => "overlay",
+    InstallMode::Replace => "replace",
+    InstallMode::Sync => "sync",
+  };
+  Ok(ChangePlan {
+    operation: format!("install_public_skill:{}:{}", safe_slug, mode_label),
+    files,
+    warnings,
+    validate_config: false,
+    create_dirs: Vec::new(),
+    remove_dirs_before,
+    remove_dirs: Vec::new(),
+  })
 }
 
 fn build_skill_path(
@@ -921,6 +938,121 @@ fn append_folder_plan(
     ));
   }
   Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+  use super::*;
+  use std::fs;
+  use std::io::Write;
+  use zip::write::FileOptions;
+
+  fn build_test_zip() -> Vec<u8> {
+    let mut buffer = Vec::new();
+    {
+      let mut zip = zip::ZipWriter::new(std::io::Cursor::new(&mut buffer));
+      let options = FileOptions::default();
+      zip
+        .start_file("demo-skill/SKILL.md", options)
+        .expect("skill md");
+      zip.write_all(b"# Demo\n").expect("write skill");
+      zip
+        .start_file("demo-skill/assets/logo.png", options)
+        .expect("asset");
+      zip.write_all(&[137, 80, 78, 71]).expect("write asset");
+      zip
+        .start_file("demo-skill/scripts/run.ts", options)
+        .expect("script");
+      zip.write_all(b"console.log('hi');").expect("write script");
+      zip.finish().expect("finish zip");
+    }
+    buffer
+  }
+
+  fn setup_existing_skill(codex_home: &Path) -> PathBuf {
+    let skill_dir = user_skills_root(codex_home).join("demo-skill");
+    fs::create_dir_all(skill_dir.join("assets")).expect("assets dir");
+    fs::create_dir_all(skill_dir.join("scripts")).expect("scripts dir");
+    fs::write(skill_dir.join("SKILL.md"), "# Old\n").expect("skill md");
+    fs::write(skill_dir.join("extra.txt"), "extra").expect("extra");
+    skill_dir
+  }
+
+  fn build_settings(codex_home: &Path) -> Settings {
+    Settings {
+      codex_home: codex_home.to_string_lossy().to_string(),
+      repo_roots: Vec::new(),
+      cli_path: None,
+    }
+  }
+
+  #[test]
+  fn install_remote_skill_overlay_keeps_extras() {
+    let temp = tempfile::tempdir().expect("tempdir");
+    let codex_home = temp.path().join("codex");
+    let skill_dir = setup_existing_skill(&codex_home);
+    let settings = build_settings(&codex_home);
+    let plan = build_install_remote_skill_plan(
+      &settings,
+      &codex_home,
+      "demo-skill",
+      SkillScope::User,
+      None,
+      InstallMode::Overlay,
+      build_test_zip(),
+    )
+    .expect("plan");
+    let extra_path = skill_dir.join("extra.txt");
+    assert!(plan.remove_dirs_before.is_empty());
+    assert!(plan.remove_dirs.is_empty());
+    assert!(!plan.files.iter().any(|change| change.path == extra_path));
+  }
+
+  #[test]
+  fn install_remote_skill_replace_removes_existing() {
+    let temp = tempfile::tempdir().expect("tempdir");
+    let codex_home = temp.path().join("codex");
+    let skill_dir = setup_existing_skill(&codex_home);
+    let settings = build_settings(&codex_home);
+    let plan = build_install_remote_skill_plan(
+      &settings,
+      &codex_home,
+      "demo-skill",
+      SkillScope::User,
+      None,
+      InstallMode::Replace,
+      build_test_zip(),
+    )
+    .expect("plan");
+    let extra_path = skill_dir.join("extra.txt");
+    assert!(plan.remove_dirs_before.contains(&skill_dir));
+    assert!(plan.files.iter().any(|change| {
+      change.path == extra_path && change.after.is_none()
+    }));
+  }
+
+  #[test]
+  fn install_remote_skill_sync_deletes_extras() {
+    let temp = tempfile::tempdir().expect("tempdir");
+    let codex_home = temp.path().join("codex");
+    let skill_dir = setup_existing_skill(&codex_home);
+    let settings = build_settings(&codex_home);
+    let plan = build_install_remote_skill_plan(
+      &settings,
+      &codex_home,
+      "demo-skill",
+      SkillScope::User,
+      None,
+      InstallMode::Sync,
+      build_test_zip(),
+    )
+    .expect("plan");
+    let extra_path = skill_dir.join("extra.txt");
+    assert!(plan.remove_dirs_before.is_empty());
+    assert!(plan.files.iter().any(|change| {
+      change.path == extra_path && change.after.is_none()
+    }));
+  }
 }
 
 fn build_plan_diff(plan: &ChangePlan) -> AppResult<String> {
@@ -1078,3 +1210,4 @@ fn single_file_plan(
     remove_dirs: Vec::new(),
   }
 }
+

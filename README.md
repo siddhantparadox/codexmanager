@@ -43,6 +43,12 @@ npm run tauri build
 ```bash
 cargo test --manifest-path src-tauri/Cargo.toml
 ```
+Includes:
+- TOML patching (scalar edits + MCP toggle)
+- Backup/restore round trip (text + binary)
+- Path traversal protection
+- Skills scan + folder categorization
+- Public skill zip planning (overlay/replace/sync)
 
 ## Usage
 
