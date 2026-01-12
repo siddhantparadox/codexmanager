@@ -43,10 +43,32 @@ pub struct McpServerSummary {
 pub struct SkillSummary {
   pub id: String,
   pub name: String,
+  pub description: Option<String>,
+  pub dir: String,
   pub path: String,
   pub scope: SkillScope,
   pub repo_root: Option<String>,
   pub modified: Option<String>,
+  pub counts: SkillFileCounts,
+  pub warnings: Vec<String>,
+}
+
+#[derive(Debug, Serialize)]
+pub struct SkillFileCounts {
+  pub skill_md: usize,
+  pub references: usize,
+  pub scripts: usize,
+  pub assets: usize,
+  pub other: usize,
+}
+
+#[derive(Debug, Serialize)]
+pub struct SkillFileEntry {
+  pub path: String,
+  pub relative_path: String,
+  pub kind: String,
+  pub size: Option<u64>,
+  pub category: String,
 }
 
 #[derive(Debug, Serialize)]
@@ -105,6 +127,7 @@ pub enum ChangeRequest {
   },
   UpdateSkill { path: String, content: String },
   DeleteSkill { path: String },
+  DeleteSkillFolder { dir: String },
   SaveUserConfig { name: String, content: String },
   DeleteUserConfig { name: String },
   RestoreBackup { backup_id: String },

@@ -7,6 +7,7 @@ import type {
   PreviewResult,
   ScanState,
   Settings,
+  SkillFileEntry,
   UserConfigSummary
 } from "./types";
 
@@ -28,6 +29,10 @@ export async function readConfigText(): Promise<ConfigText> {
 
 export async function readSkillText(path: string): Promise<string> {
   return invoke("read_skill_text", { path });
+}
+
+export async function listSkillFiles(dir: string): Promise<SkillFileEntry[]> {
+  return invoke("list_skill_files", { dir });
 }
 
 export async function listUserConfigs(): Promise<UserConfigSummary[]> {

@@ -1,3 +1,4 @@
+use std::collections::HashSet;
 use std::fs::{self, File};
 use std::io::Write;
 use std::path::{Path, PathBuf};
@@ -10,7 +11,8 @@ use walkdir::WalkDir;
 use crate::errors::{AppError, AppResult};
 use crate::models::{
   BackupFile, BackupManifest, BackupSummary, ConfigScalar, ConfigSummary,
-  McpServerSummary, SkillSummary, SkillScope, UserConfigSummary,
+  McpServerSummary, SkillFileCounts, SkillFileEntry, SkillSummary, SkillScope,
+  UserConfigSummary,
 };
 
 pub fn read_text_file(path: &Path) -> AppResult<String> {
@@ -30,6 +32,32 @@ pub fn write_atomic(path: &Path, content: &str) -> AppResult<()> {
 
   let mut file = File::create(&tmp_path)?;
   file.write_all(content.as_bytes())?;
+  file.sync_all()?;
+
+  if path.exists() {
+    fs::remove_file(path)?;
+  }
+
+  fs::rename(&tmp_path, path)?;
+  if let Some(parent) = path.parent() {
+    let _ = File::open(parent).and_then(|dir| dir.sync_all());
+  }
+  Ok(())
+}
+
+pub fn write_atomic_bytes(path: &Path, bytes: &[u8]) -> AppResult<()> {
+  if let Some(parent) = path.parent() {
+    fs::create_dir_all(parent)?;
+  }
+  let stamp = OffsetDateTime::now_utc().unix_timestamp_nanos();
+  let file_name = path
+    .file_name()
+    .and_then(|name| name.to_str())
+    .unwrap_or("file");
+  let tmp_path = path.with_file_name(format!(".{}.tmp-{}", file_name, stamp));
+
+  let mut file = File::create(&tmp_path)?;
+  file.write_all(bytes)?;
   file.sync_all()?;
 
   if path.exists() {
@@ -133,8 +161,8 @@ pub fn restore_backup(backup_root: &Path, id: &str) -> AppResult<BackupManifest>
     let target = PathBuf::from(&file.path);
     match &file.backup_path {
       Some(backup_path) => {
-        let content = fs::read_to_string(backup_path)?;
-        write_atomic(&target, &content)?;
+        let bytes = fs::read(backup_path)?;
+        write_atomic_bytes(&target, &bytes)?;
       }
       None => {
         if target.exists() {
@@ -292,38 +320,64 @@ pub fn list_user_configs(root: &Path) -> AppResult<Vec<UserConfigSummary>> {
   Ok(configs)
 }
 
-fn scan_skills_root(root: &Path, scope: SkillScope, repo_root: Option<&PathBuf>) -> Vec<SkillSummary> {
+fn scan_skills_root(
+  root: &Path,
+  scope: SkillScope,
+  repo_root: Option<&PathBuf>,
+) -> Vec<SkillSummary> {
   let mut results = Vec::new();
+  let mut seen_dirs: HashSet<PathBuf> = HashSet::new();
   for entry in WalkDir::new(root).into_iter().filter_map(Result::ok) {
     if !entry.file_type().is_file() {
       continue;
     }
-    if entry.file_name().to_string_lossy().eq_ignore_ascii_case("SKILL.md") {
-      let path = entry.path();
-      let content = fs::read_to_string(path).unwrap_or_default();
-      let fallback = path
-        .parent()
-        .and_then(|parent| parent.file_name())
-        .map(|name| name.to_string_lossy().to_string())
-        .unwrap_or_else(|| "Skill".to_string());
-      let name = parse_skill_name(&content, &fallback);
-      let id = path.strip_prefix(root).unwrap_or(path).to_string_lossy().to_string();
-      results.push(SkillSummary {
-        id,
-        name,
-        path: path.to_string_lossy().to_string(),
-        scope: scope.clone(),
-        repo_root: repo_root.map(|root| root.to_string_lossy().to_string()),
-        modified: None,
-      });
+    if !entry.file_name().to_string_lossy().eq_ignore_ascii_case("SKILL.md") {
+      continue;
     }
+    let skill_md = entry.path().to_path_buf();
+    let Some(skill_dir) = skill_md.parent().map(|parent| parent.to_path_buf()) else {
+      continue;
+    };
+    if !seen_dirs.insert(skill_dir.clone()) {
+      continue;
+    }
+    let content = fs::read_to_string(&skill_md).unwrap_or_default();
+    let meta = parse_skill_frontmatter(&content);
+    let folder_name = skill_dir
+      .file_name()
+      .map(|name| name.to_string_lossy().to_string())
+      .unwrap_or_else(|| "Skill".to_string());
+    let name = meta
+      .name
+      .clone()
+      .unwrap_or_else(|| folder_name.clone());
+    let id = skill_dir
+      .strip_prefix(root)
+      .unwrap_or(&skill_dir)
+      .to_string_lossy()
+      .to_string();
+    let counts = count_skill_files(&skill_dir);
+    let warnings = build_skill_warnings(&folder_name, &meta);
+    results.push(SkillSummary {
+      id,
+      name,
+      description: meta.description,
+      dir: skill_dir.to_string_lossy().to_string(),
+      path: skill_md.to_string_lossy().to_string(),
+      scope: scope.clone(),
+      repo_root: repo_root.map(|root| root.to_string_lossy().to_string()),
+      modified: None,
+      counts,
+      warnings,
+    });
   }
   results
 }
 
-fn parse_skill_name(content: &str, fallback: &str) -> String {
+fn parse_skill_frontmatter(content: &str) -> SkillFrontmatter {
+  let mut meta = SkillFrontmatter::default();
   if !content.starts_with("---") {
-    return fallback.to_string();
+    return meta;
   }
   for line in content.lines().skip(1) {
     let trimmed = line.trim();
@@ -331,13 +385,153 @@ fn parse_skill_name(content: &str, fallback: &str) -> String {
       break;
     }
     if let Some(rest) = trimmed.strip_prefix("name:") {
-      let value = rest.trim();
+      let value = rest.trim().trim_matches('"').trim_matches('\'');
       if !value.is_empty() {
-        return value.to_string();
+        meta.name = Some(value.to_string());
+      }
+    }
+    if let Some(rest) = trimmed.strip_prefix("description:") {
+      let value = rest.trim().trim_matches('"').trim_matches('\'');
+      if !value.is_empty() {
+        meta.description = Some(value.to_string());
       }
     }
   }
-  fallback.to_string()
+  meta
+}
+
+#[derive(Default)]
+struct SkillFrontmatter {
+  name: Option<String>,
+  description: Option<String>,
+}
+
+fn build_skill_warnings(folder_name: &str, meta: &SkillFrontmatter) -> Vec<String> {
+  let mut warnings = Vec::new();
+  match &meta.name {
+    Some(name) => {
+      if !is_valid_skill_name(name) {
+        warnings.push("Invalid skill name format".to_string());
+      }
+      if name != folder_name {
+        warnings.push("Folder name does not match frontmatter name".to_string());
+      }
+    }
+    None => warnings.push("Missing name in SKILL.md frontmatter".to_string()),
+  }
+  if meta.description.is_none() {
+    warnings.push("Missing description in SKILL.md frontmatter".to_string());
+  }
+  warnings
+}
+
+fn is_valid_skill_name(name: &str) -> bool {
+  if name.is_empty() || name.len() > 64 {
+    return false;
+  }
+  if name.starts_with('-') || name.ends_with('-') || name.contains("--") {
+    return false;
+  }
+  name
+    .chars()
+    .all(|ch| ch.is_ascii_lowercase() || ch.is_ascii_digit() || ch == '-')
+}
+
+fn count_skill_files(skill_dir: &Path) -> SkillFileCounts {
+  let mut counts = SkillFileCounts {
+    skill_md: 0,
+    references: 0,
+    scripts: 0,
+    assets: 0,
+    other: 0,
+  };
+  for entry in WalkDir::new(skill_dir)
+    .min_depth(1)
+    .into_iter()
+    .filter_map(Result::ok)
+  {
+    if !entry.file_type().is_file() {
+      continue;
+    }
+    let path = entry.path();
+    let rel = match path.strip_prefix(skill_dir) {
+      Ok(rel) => rel,
+      Err(_) => continue,
+    };
+    let category = classify_skill_path(rel);
+    match category.as_str() {
+      "skill_md" => counts.skill_md += 1,
+      "references" => counts.references += 1,
+      "scripts" => counts.scripts += 1,
+      "assets" => counts.assets += 1,
+      _ => counts.other += 1,
+    }
+  }
+  counts
+}
+
+fn classify_skill_path(rel: &Path) -> String {
+  if rel
+    .file_name()
+    .and_then(|name| name.to_str())
+    .map(|name| name.eq_ignore_ascii_case("SKILL.md"))
+    == Some(true)
+  {
+    return "skill_md".to_string();
+  }
+  let mut components = rel.components();
+  let first = components.next().and_then(|comp| comp.as_os_str().to_str());
+  match first {
+    Some("references") => "references".to_string(),
+    Some("scripts") => "scripts".to_string(),
+    Some("assets") => "assets".to_string(),
+    _ => "other".to_string(),
+  }
+}
+
+pub fn list_skill_files(skill_dir: &Path) -> AppResult<Vec<SkillFileEntry>> {
+  if !skill_dir.exists() {
+    return Err(AppError::new("skill_missing", "Skill directory not found"));
+  }
+  if !skill_dir.join("SKILL.md").exists() {
+    return Err(AppError::new(
+      "skill_invalid",
+      "SKILL.md not found in skill directory",
+    ));
+  }
+  let mut items = Vec::new();
+  for entry in WalkDir::new(skill_dir)
+    .min_depth(1)
+    .into_iter()
+    .filter_map(Result::ok)
+  {
+    let path = entry.path().to_path_buf();
+    let rel = match path.strip_prefix(skill_dir) {
+      Ok(rel) => rel,
+      Err(_) => continue,
+    };
+    let rel_display = rel.to_string_lossy().replace('\\', "/");
+    let kind = if entry.file_type().is_dir() { "dir" } else { "file" }.to_string();
+    let size = if entry.file_type().is_file() {
+      entry.metadata().ok().map(|meta| meta.len())
+    } else {
+      None
+    };
+    let category = classify_skill_path(rel);
+    items.push(SkillFileEntry {
+      path: path.to_string_lossy().to_string(),
+      relative_path: rel_display,
+      kind,
+      size,
+      category,
+    });
+  }
+  items.sort_by(|a, b| match (a.kind.as_str(), b.kind.as_str()) {
+    ("dir", "file") => std::cmp::Ordering::Less,
+    ("file", "dir") => std::cmp::Ordering::Greater,
+    _ => a.relative_path.cmp(&b.relative_path),
+  });
+  Ok(items)
 }
 
 fn build_backup_id(operation: &str) -> AppResult<(String, String)> {

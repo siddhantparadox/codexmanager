@@ -18,6 +18,7 @@ pub fn run() {
       commands::scan_state,
       commands::read_config_text,
       commands::read_skill_text,
+      commands::list_skill_files,
       commands::list_user_configs,
       commands::read_user_config_text,
       commands::preview_change,

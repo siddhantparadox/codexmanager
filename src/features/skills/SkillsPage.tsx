@@ -1,7 +1,7 @@
-import { useState } from "react";
-import { readSkillText } from "../../lib/api";
+import { useMemo, useState } from "react";
+import { listSkillFiles, readSkillText } from "../../lib/api";
 import { normalizeError } from "../../lib/errors";
-import type { SkillSummary } from "../../lib/types";
+import type { SkillFileCounts, SkillFileEntry, SkillSummary } from "../../lib/types";
 import { useAppState } from "../../store/appStore";
 
 type SkillDraft = {
@@ -11,12 +11,116 @@ type SkillDraft = {
   content: string;
 };
 
-const NEW_SKILL_TEMPLATE = `---\nname: New Skill\ndescription: Short description\n---\n\n# New Skill\nDescribe behavior here.\n`;
+const NEW_SKILL_TEMPLATE = `---
+name: new-skill
+description: Short description
+---
+
+# New Skill
+Describe behavior here.
+`;
+
+const FILE_GROUPS = [
+  { key: "skill_md", label: "SKILL.md" },
+  { key: "references", label: "References" },
+  { key: "scripts", label: "Scripts" },
+  { key: "assets", label: "Assets" },
+  { key: "other", label: "Other files" }
+] as const;
+
+const TEXT_EXTENSIONS = new Set([
+  "md",
+  "mdx",
+  "txt",
+  "toml",
+  "json",
+  "yaml",
+  "yml",
+  "ini",
+  "cfg",
+  "conf",
+  "env",
+  "ts",
+  "tsx",
+  "js",
+  "jsx",
+  "css",
+  "scss",
+  "html",
+  "htm",
+  "rs",
+  "py",
+  "sh",
+  "ps1",
+  "bat",
+  "cmd",
+  "csv",
+  "xml",
+  "svg",
+  "sql"
+]);
+
+function formatSkillCounts(counts: SkillFileCounts) {
+  const parts: string[] = [];
+  if (counts.skill_md > 0) {
+    parts.push("SKILL.md");
+  }
+  if (counts.references > 0) {
+    parts.push(`${counts.references} reference${counts.references === 1 ? "" : "s"}`);
+  }
+  if (counts.scripts > 0) {
+    parts.push(`${counts.scripts} script${counts.scripts === 1 ? "" : "s"}`);
+  }
+  if (counts.assets > 0) {
+    parts.push(`${counts.assets} asset${counts.assets === 1 ? "" : "s"}`);
+  }
+  if (counts.other > 0) {
+    parts.push(`${counts.other} other`);
+  }
+  if (parts.length === 0) {
+    return "No files detected";
+  }
+  return parts.join(" · ");
+}
+
+function isTextFile(path: string) {
+  const lower = path.toLowerCase();
+  if (lower.endsWith("skill.md")) {
+    return true;
+  }
+  const ext = lower.includes(".") ? lower.split(".").pop() ?? "" : "";
+  return TEXT_EXTENSIONS.has(ext);
+}
+
+function groupSkillFiles(files: SkillFileEntry[]) {
+  const byCategory = new Map<string, SkillFileEntry[]>();
+  for (const file of files) {
+    if (file.kind !== "file") {
+      continue;
+    }
+    const list = byCategory.get(file.category) ?? [];
+    list.push(file);
+    byCategory.set(file.category, list);
+  }
+  for (const group of byCategory.values()) {
+    group.sort((a, b) => a.relative_path.localeCompare(b.relative_path));
+  }
+  return FILE_GROUPS.map((group) => ({
+    label: group.label,
+    key: group.key,
+    items: byCategory.get(group.key) ?? []
+  }));
+}
 
 export default function SkillsPage() {
   const { scan, openPreview, setBusy, setError } = useAppState();
   const [selectedSkill, setSelectedSkill] = useState<SkillSummary | null>(null);
   const [skillText, setSkillText] = useState<string>("");
+  const [skillFiles, setSkillFiles] = useState<SkillFileEntry[]>([]);
+  const [activeFile, setActiveFile] = useState<SkillFileEntry | null>(null);
+  const [fileNotice, setFileNotice] = useState<string | null>(null);
+  const [query, setQuery] = useState("");
+  const [scopeFilter, setScopeFilter] = useState<"all" | "user" | "repo">("all");
   const [newSkill, setNewSkill] = useState<SkillDraft>({
     name: "",
     scope: "user",
@@ -24,14 +128,75 @@ export default function SkillsPage() {
     content: NEW_SKILL_TEMPLATE
   });
 
+  const groupedFiles = useMemo(() => groupSkillFiles(skillFiles), [skillFiles]);
+  const hasFiles = groupedFiles.some((group) => group.items.length > 0);
+  const canEditFile =
+    !!activeFile && activeFile.kind === "file" && isTextFile(activeFile.relative_path);
+
+  const filteredSkills = useMemo(() => {
+    const search = query.trim().toLowerCase();
+    return (scan?.skills ?? []).filter((skill) => {
+      if (scopeFilter !== "all" && skill.scope !== scopeFilter) {
+        return false;
+      }
+      if (!search) {
+        return true;
+      }
+      const haystack = `${skill.name} ${skill.description ?? ""} ${skill.dir}`.toLowerCase();
+      return haystack.includes(search);
+    });
+  }, [scan, query, scopeFilter]);
+
+  async function loadSkillFile(file: SkillFileEntry | null, withBusy = true) {
+    setSkillText("");
+    setFileNotice(null);
+    if (!file) {
+      return;
+    }
+    if (file.kind !== "file") {
+      setFileNotice("Folders cannot be previewed. Select a file to view.");
+      return;
+    }
+    if (!isTextFile(file.relative_path)) {
+      setFileNotice("Binary preview not supported. Open the file directly.");
+      return;
+    }
+    if (withBusy) {
+      setBusy(true);
+    }
+    setError(null);
+    try {
+      const text = await readSkillText(file.path);
+      setSkillText(text);
+    } catch (err) {
+      setError(normalizeError(err));
+    } finally {
+      if (withBusy) {
+        setBusy(false);
+      }
+    }
+  }
+
   async function handleSkillSelect(skill: SkillSummary) {
     setSelectedSkill(skill);
     setSkillText("");
+    setSkillFiles([]);
+    setActiveFile(null);
+    setFileNotice(null);
     setBusy(true);
     setError(null);
     try {
-      const text = await readSkillText(skill.path);
-      setSkillText(text);
+      const files = await listSkillFiles(skill.dir);
+      setSkillFiles(files);
+      const skillMd =
+        files.find(
+          (file) =>
+            file.kind === "file" &&
+            file.category === "skill_md" &&
+            file.relative_path.toLowerCase().endsWith("skill.md")
+        ) ?? null;
+      setActiveFile(skillMd);
+      await loadSkillFile(skillMd, false);
     } catch (err) {
       setError(normalizeError(err));
     } finally {
@@ -39,30 +204,76 @@ export default function SkillsPage() {
     }
   }
 
+  async function handleFileSelect(file: SkillFileEntry) {
+    if (file.kind !== "file") {
+      setActiveFile(file);
+      setSkillText("");
+      setFileNotice("Folders cannot be previewed. Select a file to view.");
+      return;
+    }
+    setActiveFile(file);
+    await loadSkillFile(file);
+  }
+
   return (
-    <section className="split">
-      <div className="panel">
+    <section className="split skills-layout">
+      <div className="panel panel-scroll">
         <div className="panel-header">
           <h2>Skills</h2>
           <span className="panel-meta">User + repo layers</span>
         </div>
-        <div className="list">
-          {scan?.skills.map((skill) => (
-            <button
-              key={skill.path}
-              className={`list-item ${selectedSkill?.path === skill.path ? "active" : ""}`}
-              onClick={() => handleSkillSelect(skill)}
+        <div className="panel-tools">
+          <div className="filter-bar">
+            <input
+              value={query}
+              onChange={(event) => setQuery(event.target.value)}
+              placeholder="Search by name, description, or path"
+            />
+            <select
+              value={scopeFilter}
+              onChange={(event) => setScopeFilter(event.target.value as typeof scopeFilter)}
             >
-              <div>
-                <p className="row-title">{skill.name}</p>
-                <p className="row-meta">{skill.scope}</p>
-              </div>
-              <span className="list-path">{skill.path}</span>
-            </button>
-          ))}
+              <option value="all">All scopes</option>
+              <option value="user">User</option>
+              <option value="repo">Repo</option>
+            </select>
+          </div>
+        </div>
+        <div className="panel-body scroll">
+          {filteredSkills.length === 0 ? (
+            <p className="ghost">No skills match the current filters.</p>
+          ) : (
+            <div className="list">
+              {filteredSkills.map((skill) => {
+                const counts = formatSkillCounts(skill.counts);
+                return (
+                  <button
+                    key={skill.id}
+                    className={`list-item ${selectedSkill?.id === skill.id ? "active" : ""}`}
+                    onClick={() => handleSkillSelect(skill)}
+                  >
+                    <div className="list-row">
+                      <div className="row-body">
+                        <p className="row-title">{skill.name}</p>
+                        {skill.description ? <p className="row-meta">{skill.description}</p> : null}
+                        <p className="row-meta">{counts}</p>
+                      </div>
+                      <div className="row-actions">
+                        <span className="badge info">{skill.scope}</span>
+                        {skill.warnings.length > 0 ? (
+                          <span className="badge warn">{skill.warnings.length} warnings</span>
+                        ) : null}
+                      </div>
+                    </div>
+                    <span className="list-path">{skill.dir}</span>
+                  </button>
+                );
+              })}
+            </div>
+          )}
         </div>
       </div>
-      <div className="panel">
+      <div className="panel panel-scroll">
         <div className="panel-header">
           <h2>Editor</h2>
           <span className="panel-meta">
@@ -71,119 +282,194 @@ export default function SkillsPage() {
         </div>
         {selectedSkill ? (
           <>
-            <textarea
-              className="editor"
-              value={skillText}
-              onChange={(event) => setSkillText(event.target.value)}
-            />
-            <div className="panel-actions">
-              <button
-                className="primary"
-                onClick={() =>
-                  void openPreview({
-                    type: "update_skill",
-                    path: selectedSkill.path,
-                    content: skillText
-                  })
-                }
-              >
-                Preview save
-              </button>
-              <button
-                className="ghost-button"
-                onClick={() =>
-                  void openPreview({
-                    type: "delete_skill",
-                    path: selectedSkill.path
-                  })
-                }
-              >
-                Preview delete
-              </button>
+            <div className="panel-body scroll">
+              <p className="panel-note">
+                {activeFile ? (
+                  <>
+                    File: <strong>{activeFile.relative_path}</strong>
+                  </>
+                ) : (
+                  "Select a file to preview."
+                )}
+              </p>
+              <div className="file-browser">
+                {hasFiles ? (
+                  groupedFiles.map((group) =>
+                    group.items.length > 0 ? (
+                      <div className="file-group" key={group.key}>
+                        <div className="file-group-title">
+                          {group.label}
+                          <span className="file-group-count">{group.items.length}</span>
+                        </div>
+                        <div className="file-list">
+                          {group.items.map((file) => {
+                            const readable = isTextFile(file.relative_path);
+                            const sizeLabel = file.size ? `${file.size} bytes` : "size unknown";
+                            return (
+                              <button
+                                key={file.path}
+                                className={`file-item ${
+                                  activeFile?.path === file.path ? "active" : ""
+                                }`}
+                                onClick={() => handleFileSelect(file)}
+                              >
+                                <div>
+                                  <p className="file-item-name">{file.relative_path}</p>
+                                  <p className="file-item-meta">
+                                    {readable ? "Text" : "Binary"} · {sizeLabel}
+                                  </p>
+                                </div>
+                                <span className="file-item-tag">{readable ? "Edit" : "View"}</span>
+                              </button>
+                            );
+                          })}
+                        </div>
+                      </div>
+                    ) : null
+                  )
+                ) : (
+                  <p className="ghost">No files found in this skill.</p>
+                )}
+              </div>
+              {fileNotice ? <p className="ghost">{fileNotice}</p> : null}
+              <textarea
+                className="editor"
+                value={skillText}
+                onChange={(event) => setSkillText(event.target.value)}
+                readOnly={!canEditFile}
+              />
+            </div>
+            <div className="panel-footer">
+              <div className="panel-actions">
+                <button
+                  className="primary"
+                  onClick={() =>
+                    activeFile
+                      ? void openPreview({
+                          type: "update_skill",
+                          path: activeFile.path,
+                          content: skillText
+                        })
+                      : undefined
+                  }
+                  disabled={!canEditFile}
+                >
+                  Preview save
+                </button>
+                <button
+                  className="ghost-button"
+                  onClick={() =>
+                    activeFile
+                      ? void openPreview({
+                          type: "delete_skill",
+                          path: activeFile.path
+                        })
+                      : undefined
+                  }
+                  disabled={!activeFile || activeFile.kind !== "file"}
+                >
+                  Preview delete file
+                </button>
+                <button
+                  className="ghost-button danger"
+                  onClick={() =>
+                    void openPreview({
+                      type: "delete_skill_folder",
+                      dir: selectedSkill.dir
+                    })
+                  }
+                >
+                  Preview delete skill folder
+                </button>
+              </div>
             </div>
           </>
         ) : (
           <p className="ghost">Select a skill to edit.</p>
         )}
       </div>
-      <div className="panel span-full">
+      <div className="panel panel-scroll span-full">
         <div className="panel-header">
           <h2>Create skill</h2>
           <span className="panel-meta">Templates are editable</span>
         </div>
-        <div className="form-grid">
-          <label>
-            Name
-            <input
-              value={newSkill.name}
-              onChange={(event) =>
-                setNewSkill((prev) => ({
-                  ...prev,
-                  name: event.target.value
-                }))
-              }
-              placeholder="skill-name"
-            />
-          </label>
-          <label>
-            Scope
-            <select
-              value={newSkill.scope}
-              onChange={(event) =>
-                setNewSkill((prev) => ({
-                  ...prev,
-                  scope: event.target.value as SkillDraft["scope"]
-                }))
-              }
-            >
-              <option value="user">User</option>
-              <option value="repo">Repo</option>
-            </select>
-          </label>
-          {newSkill.scope === "repo" ? (
-            <label className="span-2">
-              Repo root
+        <div className="panel-body scroll">
+          <div className="form-grid">
+            <label>
+              Name
               <input
-                value={newSkill.repo_root}
+                value={newSkill.name}
                 onChange={(event) =>
                   setNewSkill((prev) => ({
                     ...prev,
-                    repo_root: event.target.value
+                    name: event.target.value
                   }))
                 }
-                placeholder="D:\\projects\\myrepo"
+                placeholder="skill-name"
               />
             </label>
-          ) : null}
-          <label className="span-2">
-            Content
-            <textarea
-              value={newSkill.content}
-              onChange={(event) =>
-                setNewSkill((prev) => ({
-                  ...prev,
-                  content: event.target.value
-                }))
-              }
-            />
-          </label>
+            <label>
+              Scope
+              <select
+                value={newSkill.scope}
+                onChange={(event) =>
+                  setNewSkill((prev) => ({
+                    ...prev,
+                    scope: event.target.value as SkillDraft["scope"]
+                  }))
+                }
+              >
+                <option value="user">User</option>
+                <option value="repo">Repo</option>
+              </select>
+            </label>
+            {newSkill.scope === "repo" ? (
+              <label className="span-2">
+                Repo root
+                <input
+                  value={newSkill.repo_root}
+                  onChange={(event) =>
+                    setNewSkill((prev) => ({
+                      ...prev,
+                      repo_root: event.target.value
+                    }))
+                  }
+                  placeholder="D:\\projects\\myrepo"
+                />
+              </label>
+            ) : null}
+            <label className="span-2">
+              Content
+              <textarea
+                value={newSkill.content}
+                onChange={(event) =>
+                  setNewSkill((prev) => ({
+                    ...prev,
+                    content: event.target.value
+                  }))
+                }
+              />
+            </label>
+          </div>
         </div>
-        <div className="panel-actions">
-          <button
-            className="primary"
-            onClick={() =>
-              void openPreview({
-                type: "create_skill",
-                scope: newSkill.scope,
-                repo_root: newSkill.repo_root || null,
-                name: newSkill.name,
-                content: newSkill.content
-              })
-            }
-            disabled={!newSkill.name.trim()}
-          >
-            Preview create
-          </button>
+        <div className="panel-footer">
+          <div className="panel-actions">
+            <button
+              className="primary"
+              onClick={() =>
+                void openPreview({
+                  type: "create_skill",
+                  scope: newSkill.scope,
+                  repo_root: newSkill.repo_root || null,
+                  name: newSkill.name,
+                  content: newSkill.content
+                })
+              }
+              disabled={!newSkill.name.trim()}
+            >
+              Preview create
+            </button>
+          </div>
         </div>
       </div>
     </section>

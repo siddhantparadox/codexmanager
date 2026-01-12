@@ -19,10 +19,30 @@ export type McpServer = {
 export type SkillSummary = {
   id: string;
   name: string;
+  description?: string | null;
+  dir: string;
   path: string;
   scope: "user" | "repo";
   repo_root?: string | null;
   modified?: string | null;
+  counts: SkillFileCounts;
+  warnings: string[];
+};
+
+export type SkillFileCounts = {
+  skill_md: number;
+  references: number;
+  scripts: number;
+  assets: number;
+  other: number;
+};
+
+export type SkillFileEntry = {
+  path: string;
+  relative_path: string;
+  kind: "file" | "dir";
+  size?: number | null;
+  category: "skill_md" | "references" | "scripts" | "assets" | "other";
 };
 
 export type UserConfigSummary = {
@@ -102,6 +122,7 @@ export type ChangeRequest =
     }
   | { type: "update_skill"; path: string; content: string }
   | { type: "delete_skill"; path: string }
+  | { type: "delete_skill_folder"; dir: string }
   | { type: "save_user_config"; name: string; content: string }
   | { type: "delete_user_config"; name: string }
   | { type: "restore_backup"; backup_id: string };
