@@ -72,6 +72,34 @@ pub struct SkillFileEntry {
 }
 
 #[derive(Debug, Serialize)]
+pub struct RemoteSkillDetail {
+  pub slug: String,
+  pub name: String,
+  pub description: Option<String>,
+  pub tags: Vec<String>,
+  pub updated_at: Option<String>,
+  pub skill_md: Option<String>,
+  pub files: Vec<String>,
+  pub download_url: Option<String>,
+  pub source_url: Option<String>,
+}
+
+#[derive(Debug, Serialize)]
+pub struct RemoteSkillSummary {
+  pub slug: String,
+  pub name: String,
+  pub description: Option<String>,
+  pub tags: Vec<String>,
+  pub updated_at: Option<String>,
+}
+
+#[derive(Debug, Serialize)]
+pub struct RemoteSkillPage {
+  pub items: Vec<RemoteSkillSummary>,
+  pub next_cursor: Option<String>,
+}
+
+#[derive(Debug, Serialize)]
 pub struct UserConfigSummary {
   pub id: String,
   pub name: String,
@@ -162,9 +190,23 @@ pub enum ChangeRequest {
   UpdateSkill { path: String, content: String },
   DeleteSkill { path: String },
   DeleteSkillFolder { dir: String },
+  InstallRemoteSkill {
+    slug: String,
+    scope: SkillScope,
+    repo_root: Option<String>,
+    mode: InstallMode,
+  },
   SaveUserConfig { name: String, content: String },
   DeleteUserConfig { name: String },
   RestoreBackup { backup_id: String },
+}
+
+#[derive(Debug, Serialize, Deserialize, Clone)]
+#[serde(rename_all = "snake_case")]
+pub enum InstallMode {
+  Overlay,
+  Replace,
+  Sync,
 }
 
 #[derive(Debug, Serialize, Deserialize, Clone)]

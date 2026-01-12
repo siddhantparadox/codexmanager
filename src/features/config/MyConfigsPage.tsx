@@ -5,7 +5,7 @@ import type { ConfigText, UserConfigSummary } from "../../lib/types";
 import { useAppState } from "../../store/appStore";
 
 export default function MyConfigsPage() {
-  const { openPreview, setBusy, setError, busy, preview } = useAppState();
+  const { openPreview, setBusy, setError, busy, preview, lastAppliedAt } = useAppState();
   const [userConfigs, setUserConfigs] = useState<UserConfigSummary[]>([]);
   const [selectedUserConfig, setSelectedUserConfig] =
     useState<UserConfigSummary | null>(null);
@@ -18,6 +18,13 @@ export default function MyConfigsPage() {
   useEffect(() => {
     void loadUserConfigs();
   }, []);
+
+  useEffect(() => {
+    if (!lastAppliedAt) {
+      return;
+    }
+    void loadUserConfigs(true);
+  }, [lastAppliedAt]);
 
   useEffect(() => {
     if (pendingRefresh && !preview && !busy) {

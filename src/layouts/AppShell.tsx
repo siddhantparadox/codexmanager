@@ -45,6 +45,12 @@ function pageMeta(pathname: string): PageMeta {
       subtitle: "Toggle servers and author new MCP entries."
     };
   }
+  if (pathname.startsWith("/skills/public")) {
+    return {
+      title: "Public Skills",
+      subtitle: "Browse ClawdHub and install skills with guarded diffs."
+    };
+  }
   if (pathname.startsWith("/skills")) {
     return {
       title: "Skills",

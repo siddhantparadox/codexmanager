@@ -25,6 +25,7 @@ type AppStore = {
   scalarEdits: Record<string, string>;
   preview: PreviewResult | null;
   pendingChange: ChangeRequest | null;
+  lastAppliedAt: number;
   busy: boolean;
   notice: string | null;
   error: string | null;
@@ -65,6 +66,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
   const [scalarEdits, setScalarEdits] = useState<Record<string, string>>({});
   const [preview, setPreview] = useState<PreviewResult | null>(null);
   const [pendingChange, setPendingChange] = useState<ChangeRequest | null>(null);
+  const [lastAppliedAt, setLastAppliedAt] = useState<number>(0);
   const [busy, setBusy] = useState(false);
   const [notice, setNotice] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -149,6 +151,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
       if (configText && CONFIG_CHANGE_TYPES.includes(pendingChange.type)) {
         await loadConfig({ silent: true, showNotice: false });
       }
+      setLastAppliedAt(Date.now());
       return true;
     } catch (err) {
       setError(normalizeError(err));
@@ -223,6 +226,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
       scalarEdits,
       preview,
       pendingChange,
+      lastAppliedAt,
       busy,
       notice,
       error,

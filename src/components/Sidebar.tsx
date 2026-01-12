@@ -15,6 +15,8 @@ export default function Sidebar() {
   const { scan, busy, refresh } = useAppState();
   const configActive =
     location.pathname === "/config" || location.pathname.startsWith("/config/");
+  const skillsActive =
+    location.pathname === "/skills" || location.pathname.startsWith("/skills/");
 
   return (
     <aside className="sidebar">
@@ -30,16 +32,21 @@ export default function Sidebar() {
       <nav className="nav">
         {NAV_ITEMS.map((item) => {
           const isConfig = item.to === "/config";
+          const isSkills = item.to === "/skills";
           const className = isConfig
             ? `nav-item ${configActive ? "active" : ""}`
-            : "nav-item";
+            : isSkills
+              ? `nav-item ${skillsActive ? "active" : ""}`
+              : "nav-item";
           return (
             <div key={item.to} className="nav-group">
               <NavLink
                 to={item.to}
                 end={item.to === "/"}
                 className={({ isActive }) =>
-                  isConfig ? className : `nav-item ${isActive ? "active" : ""}`
+                  isConfig || isSkills
+                    ? className
+                    : `nav-item ${isActive ? "active" : ""}`
                 }
               >
                 {item.label}
@@ -61,6 +68,18 @@ export default function Sidebar() {
                     }
                   >
                     My Configs
+                  </NavLink>
+                </div>
+              ) : null}
+              {isSkills && skillsActive ? (
+                <div className="subnav">
+                  <NavLink
+                    to="/skills/public"
+                    className={({ isActive }) =>
+                      `subnav-item ${isActive ? "active" : ""}`
+                    }
+                  >
+                    Public Skills
                   </NavLink>
                 </div>
               ) : null}

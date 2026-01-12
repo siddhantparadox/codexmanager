@@ -45,6 +45,31 @@ export type SkillFileEntry = {
   category: "skill_md" | "references" | "scripts" | "assets" | "other";
 };
 
+export type RemoteSkillDetail = {
+  slug: string;
+  name: string;
+  description?: string | null;
+  tags: string[];
+  updated_at?: string | null;
+  skill_md?: string | null;
+  files: string[];
+  download_url?: string | null;
+  source_url?: string | null;
+};
+
+export type RemoteSkillSummary = {
+  slug: string;
+  name: string;
+  description?: string | null;
+  tags: string[];
+  updated_at?: string | null;
+};
+
+export type RemoteSkillPage = {
+  items: RemoteSkillSummary[];
+  next_cursor?: string | null;
+};
+
 export type UserConfigSummary = {
   id: string;
   name: string;
@@ -118,6 +143,8 @@ export type SkillFolderConfig = {
   assets: SkillFolderSpec;
 };
 
+export type InstallMode = "overlay" | "replace" | "sync";
+
 export type ChangeRequest =
   | { type: "toggle_mcp_server"; name: string; enabled: boolean }
   | { type: "set_config_scalar"; key: string; value: ScalarValue }
@@ -135,6 +162,13 @@ export type ChangeRequest =
   | { type: "update_skill"; path: string; content: string }
   | { type: "delete_skill"; path: string }
   | { type: "delete_skill_folder"; dir: string }
+  | {
+      type: "install_remote_skill";
+      slug: string;
+      scope: "user" | "repo";
+      repo_root?: string | null;
+      mode: InstallMode;
+    }
   | { type: "save_user_config"; name: string; content: string }
   | { type: "delete_user_config"; name: string }
   | { type: "restore_backup"; backup_id: string };

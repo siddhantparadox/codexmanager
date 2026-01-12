@@ -133,7 +133,7 @@ function buildFolderGroups(files: SkillFileEntry[]) {
 }
 
 export default function SkillsPage() {
-  const { scan, openPreview, setBusy, setError } = useAppState();
+  const { scan, openPreview, setBusy, setError, lastAppliedAt } = useAppState();
   const [selectedSkill, setSelectedSkill] = useState<SkillSummary | null>(null);
   const [skillText, setSkillText] = useState<string>("");
   const [skillFiles, setSkillFiles] = useState<SkillFileEntry[]>([]);
@@ -297,6 +297,54 @@ export default function SkillsPage() {
     }
   }
 
+  function clearSelectedSkill() {
+    setSelectedSkill(null);
+    setSkillText("");
+    setSkillFiles([]);
+    setActiveFile(null);
+    setFileNotice(null);
+  }
+
+  async function refreshSelectedSkill(withBusy = false) {
+    if (!selectedSkill) {
+      return;
+    }
+    if (withBusy) {
+      setBusy(true);
+    }
+    setError(null);
+    try {
+      const files = await listSkillFiles(selectedSkill.dir);
+      setSkillFiles(files);
+      let nextActive =
+        (activeFile && files.find((file) => file.path === activeFile.path)) ?? null;
+      if (!nextActive) {
+        nextActive =
+          files.find(
+            (file) =>
+              file.kind === "file" &&
+              file.category === "skill_md" &&
+              file.relative_path.toLowerCase().endsWith("skill.md")
+          ) ?? null;
+      }
+      setActiveFile(nextActive);
+      if (nextActive?.kind === "file") {
+        await loadSkillFile(nextActive, false);
+      } else if (nextActive) {
+        setSkillText("");
+        setFileNotice("Folders cannot be previewed. Select a file to view.");
+      } else {
+        setSkillText("");
+      }
+    } catch (err) {
+      setError(normalizeError(err));
+    } finally {
+      if (withBusy) {
+        setBusy(false);
+      }
+    }
+  }
+
   async function handleSkillSelect(skill: SkillSummary) {
     setSelectedSkill(skill);
     setSkillText("");
@@ -334,6 +382,33 @@ export default function SkillsPage() {
     setActiveFile(file);
     await loadSkillFile(file);
   }
+
+  useEffect(() => {
+    if (!selectedSkill) {
+      return;
+    }
+    const match =
+      scan?.skills.find((skill) => skill.id === selectedSkill.id) ?? null;
+    if (!match) {
+      clearSelectedSkill();
+      return;
+    }
+    if (match !== selectedSkill) {
+      setSelectedSkill(match);
+    }
+  }, [scan, selectedSkill]);
+
+  useEffect(() => {
+    if (!selectedSkill || !lastAppliedAt) {
+      return;
+    }
+    const match =
+      scan?.skills.find((skill) => skill.id === selectedSkill.id) ?? null;
+    if (!match) {
+      return;
+    }
+    void refreshSelectedSkill(false);
+  }, [lastAppliedAt, scan, selectedSkill]);
 
   return (
     <section className="split skills-layout">

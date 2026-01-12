@@ -8,6 +8,8 @@ import type {
   ScanState,
   Settings,
   SkillFileEntry,
+  RemoteSkillDetail,
+  RemoteSkillPage,
   UserConfigSummary
 } from "./types";
 
@@ -33,6 +35,22 @@ export async function readSkillText(path: string): Promise<string> {
 
 export async function listSkillFiles(dir: string): Promise<SkillFileEntry[]> {
   return invoke("list_skill_files", { dir });
+}
+
+export async function listPublicSkills(
+  query?: string | null,
+  cursor?: string | null,
+  limit?: number
+): Promise<RemoteSkillPage> {
+  return invoke("list_public_skills", {
+    query: query ?? null,
+    cursor: cursor ?? null,
+    limit: limit ?? null
+  });
+}
+
+export async function fetchPublicSkill(slug: string): Promise<RemoteSkillDetail> {
+  return invoke("fetch_public_skill", { slug });
 }
 
 export async function listUserConfigs(): Promise<UserConfigSummary[]> {

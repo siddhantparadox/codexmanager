@@ -7,6 +7,7 @@ import MyConfigsPage from "./features/config/MyConfigsPage";
 import DashboardPage from "./features/dashboard/DashboardPage";
 import McpPage from "./features/mcp/McpPage";
 import SettingsPage from "./features/settings/SettingsPage";
+import PublicSkillsPage from "./features/skills/PublicSkillsPage";
 import SkillsPage from "./features/skills/SkillsPage";
 import { AppProvider } from "./store/appStore";
 
@@ -22,6 +23,7 @@ export default function App() {
             <Route path="config/my" element={<MyConfigsPage />} />
             <Route path="mcp" element={<McpPage />} />
             <Route path="skills" element={<SkillsPage />} />
+            <Route path="skills/public" element={<PublicSkillsPage />} />
             <Route path="backups" element={<BackupsPage />} />
             <Route path="settings" element={<SettingsPage />} />
             <Route path="*" element={<Navigate to="/" replace />} />

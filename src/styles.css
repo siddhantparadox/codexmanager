@@ -363,6 +363,27 @@ body::before {
   overflow: auto;
 }
 
+.public-skills-list {
+  flex: 1;
+  min-height: 0;
+  max-height: clamp(320px, 60vh, 720px);
+  overflow: auto;
+  padding-right: 4px;
+}
+
+.public-skills-detail {
+  flex: 1;
+  min-height: 0;
+  max-height: clamp(320px, 60vh, 720px);
+  overflow: auto;
+  padding-right: 4px;
+}
+
+.load-more {
+  width: 100%;
+  margin-top: 12px;
+}
+
 .panel-footer {
   padding-top: 12px;
   border-top: 1px solid var(--line);
@@ -689,6 +710,27 @@ body::before {
   background: var(--panel);
   font-size: 11px;
   color: rgba(15, 26, 23, 0.75);
+}
+
+.file-list {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-top: 12px;
+  max-height: 180px;
+  overflow: auto;
+  padding-right: 4px;
+}
+
+.file-pill {
+  display: inline-flex;
+  align-items: center;
+  padding: 4px 10px;
+  border-radius: 12px;
+  border: 1px dashed var(--line);
+  background: rgba(255, 255, 255, 0.6);
+  font-size: 11px;
+  color: rgba(15, 26, 23, 0.7);
 }
 
 .row-actions {

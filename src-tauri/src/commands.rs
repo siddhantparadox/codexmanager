@@ -1,3 +1,4 @@
+use std::collections::HashSet;
 use std::fs as std_fs;
 use std::path::{Path, PathBuf};
 use std::sync::Mutex;
@@ -7,14 +8,16 @@ use tauri::{AppHandle, State};
 use crate::errors::{AppError, AppResult};
 use crate::fs;
 use crate::models::{
-  ApplyResult, ChangeRequest, ConfigText, Diagnostic, PreviewFile, PreviewResult, ScanState,
-  Settings, SkillFileEntry, SkillFolderSpec, SkillScope, UserConfigSummary,
+  ApplyResult, ChangeRequest, ConfigText, Diagnostic, InstallMode, PreviewFile, PreviewResult,
+  RemoteSkillDetail, RemoteSkillPage, ScanState, Settings, SkillFileEntry, SkillFolderSpec,
+  SkillScope, UserConfigSummary,
 };
 use crate::paths::{
   config_path, is_within_root, repo_skills_root, resolve_codex_home, sanitize_config_name,
   sanitize_skill_name, user_skills_root, AppPaths,
 };
 use crate::state::{load_settings, normalize_settings, save_settings, AppState};
+use crate::skills_registry;
 use crate::toml_patch;
 use similar::TextDiff;
 use walkdir::WalkDir;
@@ -127,6 +130,33 @@ pub fn list_skill_files(
 }
 
 #[tauri::command]
+pub fn fetch_public_skill(
+  _app: AppHandle,
+  _state: State<Mutex<AppState>>,
+  slug: String,
+) -> AppResult<RemoteSkillDetail> {
+  skills_registry::fetch_skill_detail(&slug)
+}
+
+#[tauri::command]
+pub fn list_public_skills(
+  _app: AppHandle,
+  _state: State<Mutex<AppState>>,
+  query: Option<String>,
+  cursor: Option<String>,
+  limit: Option<usize>,
+) -> AppResult<RemoteSkillPage> {
+  let limit = limit.unwrap_or(10).clamp(1, 50);
+  let cursor = cursor.as_deref();
+  if let Some(value) = query {
+    if !value.trim().is_empty() {
+      return skills_registry::search_skills(&value, limit, cursor);
+    }
+  }
+  skills_registry::list_skills(limit, cursor)
+}
+
+#[tauri::command]
 pub fn list_user_configs(app: AppHandle) -> AppResult<Vec<UserConfigSummary>> {
   let paths = AppPaths::from_app(&app)?;
   fs::list_user_configs(&paths.user_configs_dir())
@@ -221,6 +251,7 @@ struct ChangePlan {
   warnings: Vec<String>,
   validate_config: bool,
   create_dirs: Vec<PathBuf>,
+  remove_dirs_before: Vec<PathBuf>,
   remove_dirs: Vec<PathBuf>,
 }
 
@@ -228,6 +259,7 @@ struct FileChange {
   path: PathBuf,
   before: Option<String>,
   after: Option<String>,
+  after_bytes: Option<Vec<u8>>,
   redact: bool,
   binary: bool,
 }
@@ -293,12 +325,14 @@ fn build_change_plan(
           path: config_path,
           before,
           after: Some(merged),
+          after_bytes: None,
           redact: true,
           binary: false,
         }],
         warnings,
         validate_config: true,
         create_dirs: Vec::new(),
+        remove_dirs_before: Vec::new(),
         remove_dirs: Vec::new(),
       })
     }
@@ -345,12 +379,13 @@ fn build_change_plan(
       let mut warnings = Vec::new();
       let mut create_dirs = Vec::new();
       let mut files = vec![FileChange {
-          path,
-          before,
-          after: Some(content),
-          redact: false,
-          binary: false,
-        }];
+        path,
+        before,
+        after: Some(content),
+        after_bytes: None,
+        redact: false,
+        binary: false,
+      }];
       if let Some(skill_dir) = skill_dir.as_ref() {
         append_folder_plan(
           skill_dir,
@@ -383,6 +418,7 @@ fn build_change_plan(
         warnings,
         validate_config: false,
         create_dirs,
+        remove_dirs_before: Vec::new(),
         remove_dirs: Vec::new(),
       })
     }
@@ -398,12 +434,14 @@ fn build_change_plan(
           path,
           before: Some(before),
           after: Some(content),
+          after_bytes: None,
           redact: false,
           binary: false,
         }],
         warnings: Vec::new(),
         validate_config: false,
         create_dirs: Vec::new(),
+        remove_dirs_before: Vec::new(),
         remove_dirs: Vec::new(),
       })
     }
@@ -419,12 +457,14 @@ fn build_change_plan(
             path,
             before: None,
             after: None,
+            after_bytes: None,
             redact: false,
             binary: false,
           }],
           warnings: vec!["File not found; nothing to delete.".to_string()],
           validate_config: false,
           create_dirs: Vec::new(),
+          remove_dirs_before: Vec::new(),
           remove_dirs: Vec::new(),
         });
       }
@@ -435,12 +475,14 @@ fn build_change_plan(
           path,
           before,
           after: None,
+          after_bytes: None,
           redact: false,
           binary,
         }],
         warnings: Vec::new(),
         validate_config: false,
         create_dirs: Vec::new(),
+        remove_dirs_before: Vec::new(),
         remove_dirs: Vec::new(),
       })
     }
@@ -465,6 +507,7 @@ fn build_change_plan(
           path: file_path,
           before,
           after: None,
+          after_bytes: None,
           redact: false,
           binary,
         });
@@ -475,7 +518,153 @@ fn build_change_plan(
         warnings: Vec::new(),
         validate_config: false,
         create_dirs: Vec::new(),
+        remove_dirs_before: Vec::new(),
         remove_dirs: vec![path],
+      })
+    }
+    ChangeRequest::InstallRemoteSkill {
+      slug,
+      scope,
+      repo_root,
+      mode,
+    } => {
+      let slug_trim = slug.trim();
+      if slug_trim.is_empty() {
+        return Err(AppError::new("skill_slug", "Skill slug cannot be empty"));
+      }
+      let mut warnings = Vec::new();
+      warnings.push(
+        "Remote package is fetched again on apply; preview may change if the registry updates."
+          .to_string(),
+      );
+      let safe_slug = sanitize_skill_name(slug_trim)?;
+      if safe_slug != slug_trim {
+        warnings.push(format!("Local folder will be named '{}'.", safe_slug));
+      }
+      let root = match scope {
+        SkillScope::User => user_skills_root(&codex_home),
+        SkillScope::Repo => {
+          let repo_root = repo_root.ok_or_else(|| {
+            AppError::new("repo_root", "Repo scope requires repo_root")
+          })?;
+          if !settings.repo_roots.contains(&repo_root) {
+            return Err(AppError::new("repo_root", "Repo root not registered"));
+          }
+          repo_skills_root(Path::new(&repo_root))
+        }
+      };
+      let target_dir = root.join(&safe_slug);
+      if !is_within_root(&root, &target_dir) {
+        return Err(AppError::new("path_denied", "Target path not allowed"));
+      }
+
+      let zip_bytes = skills_registry::download_latest_zip(slug_trim)?;
+      let entries = skills_registry::extract_zip_entries(&zip_bytes)?;
+      if entries.is_empty() {
+        return Err(AppError::new("zip_empty", "No files found in skill package"));
+      }
+
+      let mut files = Vec::new();
+      let mut new_paths: HashSet<PathBuf> = HashSet::new();
+      let mut has_skill_md = false;
+
+      for entry in entries {
+        if entry
+          .path
+          .file_name()
+          .and_then(|name| name.to_str())
+          .map(|name| name.eq_ignore_ascii_case("SKILL.md"))
+          == Some(true)
+        {
+          has_skill_md = true;
+        }
+        let target_path = target_dir.join(&entry.path);
+        if new_paths.contains(&target_path) {
+          warnings.push(format!(
+            "Duplicate entry skipped: {}",
+            entry.path.to_string_lossy()
+          ));
+          continue;
+        }
+        let (before, before_binary) = if target_path.exists() {
+          read_text_or_binary(&target_path)?
+        } else {
+          (None, false)
+        };
+        let change = build_change_from_bytes(target_path.clone(), entry.bytes, before, before_binary);
+        files.push(change);
+        new_paths.insert(target_path);
+      }
+
+      if !has_skill_md {
+        warnings.push("Package does not include SKILL.md.".to_string());
+      }
+
+      let mut remove_dirs_before = Vec::new();
+      match &mode {
+        InstallMode::Overlay => {}
+        InstallMode::Replace => {
+          warnings.push(
+            "Replace mode removes the existing skill folder before install."
+              .to_string(),
+          );
+          if target_dir.exists() {
+            remove_dirs_before.push(target_dir.clone());
+          }
+          let mut deletions = Vec::new();
+          if target_dir.exists() {
+            for existing in collect_skill_files(&target_dir)? {
+              let (before, binary) = read_text_or_binary(&existing)?;
+              deletions.push(FileChange {
+                path: existing,
+                before,
+                after: None,
+                after_bytes: None,
+                redact: false,
+                binary,
+              });
+            }
+          }
+          deletions.append(&mut files);
+          files = deletions;
+        }
+        InstallMode::Sync => {
+          warnings.push(
+            "Sync mode deletes local files not present in the package."
+              .to_string(),
+          );
+          if target_dir.exists() {
+            for existing in collect_skill_files(&target_dir)? {
+              if new_paths.contains(&existing) {
+                continue;
+              }
+              let (before, binary) = read_text_or_binary(&existing)?;
+              files.push(FileChange {
+                path: existing,
+                before,
+                after: None,
+                after_bytes: None,
+                redact: false,
+                binary,
+              });
+            }
+          }
+        }
+      }
+
+      let mode_label = match mode {
+        InstallMode::Overlay => "overlay",
+        InstallMode::Replace => "replace",
+        InstallMode::Sync => "sync",
+      };
+      Ok(ChangePlan {
+        operation: format!("install_public_skill:{}:{}", safe_slug, mode_label),
+        files,
+        warnings,
+        validate_config: false,
+        create_dirs: Vec::new(),
+        remove_dirs_before,
+        remove_dirs: Vec::new(),
       })
     }
     ChangeRequest::SaveUserConfig { name, content } => {
@@ -506,12 +695,14 @@ fn build_change_plan(
           path,
           before,
           after: Some(merged),
+          after_bytes: None,
           redact: true,
           binary: false,
         }],
         warnings,
         validate_config: false,
         create_dirs: Vec::new(),
+        remove_dirs_before: Vec::new(),
         remove_dirs: Vec::new(),
       })
     }
@@ -528,12 +719,14 @@ fn build_change_plan(
           path,
           before: Some(before),
           after: None,
+          after_bytes: None,
           redact: true,
           binary: false,
         }],
         warnings: Vec::new(),
         validate_config: false,
         create_dirs: Vec::new(),
+        remove_dirs_before: Vec::new(),
         remove_dirs: Vec::new(),
       })
     }
@@ -544,14 +737,14 @@ fn build_change_plan(
       let mut validate_config = false;
       for file in manifest.files {
         let target = PathBuf::from(&file.path);
-        let (before, before_binary) = if target.exists() {
-          read_text_or_binary(&target)?
+        let (before, _before_bytes, before_binary) = if target.exists() {
+          read_text_or_binary_bytes(&target)?
         } else {
-          (None, false)
+          (None, None, false)
         };
-        let (after, after_binary) = match &file.backup_path {
-          Some(backup_path) => read_text_or_binary(Path::new(backup_path))?,
-          None => (None, false),
+        let (after, after_bytes, after_binary) = match &file.backup_path {
+          Some(backup_path) => read_text_or_binary_bytes(Path::new(backup_path))?,
+          None => (None, None, false),
         };
         let redact = should_redact_toml(&target, &paths.user_configs_dir());
         let binary = before_binary || after_binary;
@@ -562,6 +755,7 @@ fn build_change_plan(
           path: target,
           before,
           after,
+          after_bytes: if after_binary { after_bytes } else { None },
           redact,
           binary,
         });
@@ -572,6 +766,7 @@ fn build_change_plan(
         warnings: Vec::new(),
         validate_config,
         create_dirs: Vec::new(),
+        remove_dirs_before: Vec::new(),
         remove_dirs: Vec::new(),
       })
     }
@@ -606,6 +801,42 @@ fn read_text_or_binary(path: &Path) -> AppResult<(Option<String>, bool)> {
   match String::from_utf8(bytes) {
     Ok(text) => Ok((Some(text), false)),
     Err(_) => Ok((Some(String::new()), true)),
+  }
+}
+
+fn read_text_or_binary_bytes(
+  path: &Path,
+) -> AppResult<(Option<String>, Option<Vec<u8>>, bool)> {
+  let bytes = std_fs::read(path)?;
+  match String::from_utf8(bytes.clone()) {
+    Ok(text) => Ok((Some(text), None, false)),
+    Err(_) => Ok((Some(String::new()), Some(bytes), true)),
+  }
+}
+
+fn build_change_from_bytes(
+  path: PathBuf,
+  bytes: Vec<u8>,
+  before: Option<String>,
+  before_binary: bool,
+) -> FileChange {
+  match String::from_utf8(bytes.clone()) {
+    Ok(text) => FileChange {
+      path,
+      before,
+      after: Some(text),
+      after_bytes: None,
+      redact: false,
+      binary: before_binary,
+    },
+    Err(_) => FileChange {
+      path,
+      before,
+      after: Some(String::new()),
+      after_bytes: Some(bytes),
+      redact: false,
+      binary: true,
+    },
   }
 }
 
@@ -671,6 +902,7 @@ fn append_folder_plan(
       path: file_path,
       before: None,
       after: Some(String::new()),
+      after_bytes: None,
       redact: false,
       binary: false,
     });
@@ -698,12 +930,12 @@ fn build_plan_diff(plan: &ChangePlan) -> AppResult<String> {
     let after = file.after.as_deref().unwrap_or("");
     let (before_text, after_text) = if file.binary {
       let before_label = if file.before.is_some() {
-        "[binary file]".to_string()
+        "[binary file before]".to_string()
       } else {
         "".to_string()
       };
       let after_label = if file.after.is_some() {
-        "[binary file]".to_string()
+        "[binary file after]".to_string()
       } else {
         "".to_string()
       };
@@ -733,15 +965,23 @@ fn build_plan_diff(plan: &ChangePlan) -> AppResult<String> {
 }
 
 fn apply_plan(plan: &ChangePlan) -> AppResult<()> {
+  for dir in &plan.remove_dirs_before {
+    if dir.exists() {
+      std_fs::remove_dir_all(dir)?;
+    }
+  }
   for dir in &plan.create_dirs {
     std_fs::create_dir_all(dir)?;
   }
   for file in &plan.files {
-    match &file.after {
-      Some(content) => {
+    match (&file.after, &file.after_bytes) {
+      (_, Some(bytes)) => {
+        fs::write_atomic_bytes(&file.path, bytes)?;
+      }
+      (Some(content), None) => {
         fs::write_atomic(&file.path, content)?;
       }
-      None => {
+      (None, None) => {
         if file.path.exists() {
           std_fs::remove_file(&file.path)?;
         }
@@ -827,12 +1067,14 @@ fn single_file_plan(
       path,
       before: Some(before),
       after: Some(after),
+      after_bytes: None,
       redact,
       binary: false,
     }],
     warnings: Vec::new(),
     validate_config,
     create_dirs: Vec::new(),
+    remove_dirs_before: Vec::new(),
     remove_dirs: Vec::new(),
   }
 }
