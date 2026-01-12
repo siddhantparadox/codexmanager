@@ -673,6 +673,24 @@ body::before {
   color: rgba(15, 26, 23, 0.6);
 }
 
+.count-pills {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-top: 6px;
+}
+
+.pill {
+  display: inline-flex;
+  align-items: center;
+  padding: 4px 8px;
+  border-radius: 999px;
+  border: 1px solid var(--line);
+  background: var(--panel);
+  font-size: 11px;
+  color: rgba(15, 26, 23, 0.75);
+}
+
 .row-actions {
   display: flex;
   gap: 8px;

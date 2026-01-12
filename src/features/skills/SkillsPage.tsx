@@ -65,26 +65,32 @@ const TEXT_EXTENSIONS = new Set([
 ]);
 
 function formatSkillCounts(counts: SkillFileCounts) {
-  const parts: string[] = [];
+  const parts: { key: string; label: string }[] = [];
   if (counts.skill_md > 0) {
-    parts.push("SKILL.md");
+    parts.push({ key: "skill", label: "SKILL.md" });
   }
   if (counts.references > 0) {
-    parts.push(`${counts.references} reference${counts.references === 1 ? "" : "s"}`);
+    parts.push({
+      key: "references",
+      label: `${counts.references} reference${counts.references === 1 ? "" : "s"}`
+    });
   }
   if (counts.scripts > 0) {
-    parts.push(`${counts.scripts} script${counts.scripts === 1 ? "" : "s"}`);
+    parts.push({
+      key: "scripts",
+      label: `${counts.scripts} script${counts.scripts === 1 ? "" : "s"}`
+    });
   }
   if (counts.assets > 0) {
-    parts.push(`${counts.assets} asset${counts.assets === 1 ? "" : "s"}`);
+    parts.push({
+      key: "assets",
+      label: `${counts.assets} asset${counts.assets === 1 ? "" : "s"}`
+    });
   }
   if (counts.other > 0) {
-    parts.push(`${counts.other} other`);
+    parts.push({ key: "other", label: `${counts.other} other` });
   }
-  if (parts.length === 0) {
-    return "No files detected";
-  }
-  return parts.join(" · ");
+  return parts;
 }
 
 function isTextFile(path: string) {
@@ -283,8 +289,17 @@ export default function SkillsPage() {
                     <div className="list-row">
                       <div className="row-body">
                         <p className="row-title">{skill.name}</p>
-                        {skill.description ? <p className="row-meta">{skill.description}</p> : null}
-                        <p className="row-meta">{counts}</p>
+                        {counts.length > 0 ? (
+                          <div className="count-pills">
+                            {counts.map((item) => (
+                              <span key={item.key} className="pill">
+                                {item.label}
+                              </span>
+                            ))}
+                          </div>
+                        ) : (
+                          <p className="row-meta">No files detected</p>
+                        )}
                       </div>
                       <div className="row-actions">
                         <span className="badge info">{skill.scope}</span>
