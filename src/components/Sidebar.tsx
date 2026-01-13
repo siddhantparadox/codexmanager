@@ -22,7 +22,7 @@ export default function Sidebar() {
     <aside className="sidebar">
       <div className="brand">
         <div className="brand-mark">
-          <img src="/logo.png" alt="Codex Manager logo" className="brand-logo" />
+          <img src="/logo.svg" alt="Codex Manager logo" className="brand-logo" />
         </div>
         <div>
           <p className="brand-title">Codex Manager</p>

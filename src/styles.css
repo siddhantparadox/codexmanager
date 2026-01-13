@@ -76,13 +76,13 @@ body::before {
   width: 52px;
   height: 52px;
   border-radius: 18px;
-  background: #0b0b0b;
+  background: transparent;
   color: white;
   font-family: var(--display);
   font-size: 22px;
   display: grid;
   place-items: center;
-  box-shadow: 0 12px 30px rgba(208, 92, 43, 0.3);
+  box-shadow: none;
   overflow: hidden;
 }
 

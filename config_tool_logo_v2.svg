@@ -1,0 +1,23 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1024 1024" width="1024" height="1024">
+  <g transform="translate(512 512) scale(2.4) translate(-512 -512)">
+    <!-- Top left toggle - ink (inactive) -->
+    <rect x="320" y="340" width="140" height="72" rx="36" fill="#0f1a17" opacity="0.2"/>
+    <circle cx="356" cy="376" r="28" fill="#0f1a17" opacity="0.4"/>
+
+    <!-- Top right toggle - ink (inactive) -->
+    <rect x="564" y="340" width="140" height="72" rx="36" fill="#0f1a17" opacity="0.2"/>
+    <circle cx="600" cy="376" r="28" fill="#0f1a17" opacity="0.4"/>
+
+    <!-- Middle center toggle - ACTIVE - terracotta (emphasized) -->
+    <rect x="442" y="476" width="140" height="72" rx="36" fill="#d05c2b"/>
+    <circle cx="554" cy="512" r="28" fill="#f3efe7"/>
+
+    <!-- Bottom left toggle - ink (inactive) -->
+    <rect x="320" y="612" width="140" height="72" rx="36" fill="#0f1a17" opacity="0.2"/>
+    <circle cx="356" cy="648" r="28" fill="#0f1a17" opacity="0.4"/>
+
+    <!-- Bottom right toggle - ink (inactive) -->
+    <rect x="564" y="612" width="140" height="72" rx="36" fill="#0f1a17" opacity="0.2"/>
+    <circle cx="600" cy="648" r="28" fill="#0f1a17" opacity="0.4"/>
+  </g>
+</svg>
