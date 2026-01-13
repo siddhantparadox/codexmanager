@@ -4,6 +4,8 @@ Codex Manager is a desktop configuration and asset manager for OpenAI Codex.
 It does not run Codex sessions or execute arbitrary commands. It edits and organizes on-disk
 Codex files with a safety-first flow (diff preview, backups, atomic writes).
 
+![Codex Manager dashboard](screenshots/Dashboard.jpg)
+
 ## Installation
 
 ### Prerequisites
