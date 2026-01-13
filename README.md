@@ -17,7 +17,7 @@ Codex files with a safety-first flow (diff preview, backups, atomic writes).
 - Diagnostics panel for parse errors and missing paths.
 - Settings for CODEX_HOME and repo roots.
 
-## Installation
+## Installation (local development)
 
 ### Prerequisites
 - Node.js 18+ (20+ recommended)
@@ -33,6 +33,8 @@ Tauri prerequisites: https://v2.tauri.app/start/prerequisites/
 ```bash
 npm install
 ```
+
+For installing and using the app, download the installer from the GitHub Releases page.
 
 ## Local development
 
