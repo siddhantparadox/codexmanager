@@ -97,5 +97,5 @@ User-created presets are stored in the app data directory under `user-configs/`.
   - `store/` shared state + backend actions
 
 ## Notes
-- Secrets are redacted in previews and UI. Raw edits preserve sensitive values.
+- Raw config editors and previews show full values; handle secrets with care.
 - The app only runs a small allowlist of Codex CLI management commands (optional).

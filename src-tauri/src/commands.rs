@@ -94,10 +94,9 @@ pub fn read_config_text(app: AppHandle, state: State<Mutex<AppState>>) -> AppRes
     return Err(AppError::new("config_missing", "config.toml not found"));
   }
   let text = fs::read_text_file(&path)?;
-  let redacted = toml_patch::redact_toml(&text)?;
   Ok(ConfigText {
-    text: redacted,
-    redacted: toml_patch::contains_sensitive_keys(&text),
+    text,
+    redacted: false,
   })
 }
 
@@ -170,10 +169,9 @@ pub fn read_user_config_text(app: AppHandle, name: String) -> AppResult<ConfigTe
     return Err(AppError::new("config_missing", "Saved config not found"));
   }
   let text = fs::read_text_file(&path)?;
-  let redacted = toml_patch::redact_toml(&text)?;
   Ok(ConfigText {
-    text: redacted,
-    redacted: toml_patch::contains_sensitive_keys(&text),
+    text,
+    redacted: false,
   })
 }
 
@@ -283,7 +281,7 @@ fn build_change_plan(
         before,
         after,
         true,
-        true,
+        false,
       ))
     }
     ChangeRequest::SetConfigScalar { key, value } => {
@@ -296,7 +294,7 @@ fn build_change_plan(
         before,
         after,
         true,
-        true,
+        false,
       ))
     }
     ChangeRequest::ReplaceConfig { content } => {
@@ -305,31 +303,18 @@ fn build_change_plan(
       } else {
         None
       };
-      let merged = if let Some(existing) = before.as_deref() {
-        toml_patch::merge_sensitive_values(existing, &content)?
-      } else {
-        content
-      };
-      let mut warnings = Vec::new();
-      if before
-        .as_deref()
-        .map(toml_patch::contains_sensitive_keys)
-        .unwrap_or(false)
-      {
-        warnings.push("Sensitive values preserved on apply.".to_string());
-      }
-      let _: toml::Value = merged.parse()?;
+      let _: toml::Value = content.parse()?;
       Ok(ChangePlan {
         operation: "replace_config".to_string(),
         files: vec![FileChange {
           path: config_path,
           before,
-          after: Some(merged),
+          after: Some(content),
           after_bytes: None,
-          redact: true,
+          redact: false,
           binary: false,
         }],
-        warnings,
+        warnings: Vec::new(),
         validate_config: true,
         create_dirs: Vec::new(),
         remove_dirs_before: Vec::new(),
@@ -346,7 +331,7 @@ fn build_change_plan(
         before,
         after,
         true,
-        true,
+        false,
       ))
     }
     ChangeRequest::DeleteMcpServer { name } => {
@@ -359,7 +344,7 @@ fn build_change_plan(
         before,
         after,
         true,
-        true,
+        false,
       ))
     }
     ChangeRequest::CreateSkill {
@@ -551,31 +536,18 @@ fn build_change_plan(
       } else {
         None
       };
-      let merged = if let Some(existing) = before.as_deref() {
-        toml_patch::merge_sensitive_values(existing, &content)?
-      } else {
-        content
-      };
-      let mut warnings = Vec::new();
-      if before
-        .as_deref()
-        .map(toml_patch::contains_sensitive_keys)
-        .unwrap_or(false)
-      {
-        warnings.push("Sensitive values preserved on save.".to_string());
-      }
-      let _: toml::Value = merged.parse()?;
+      let _: toml::Value = content.parse()?;
       Ok(ChangePlan {
         operation: "save_user_config".to_string(),
         files: vec![FileChange {
           path,
           before,
-          after: Some(merged),
+          after: Some(content),
           after_bytes: None,
-          redact: true,
+          redact: false,
           binary: false,
         }],
-        warnings,
+        warnings: Vec::new(),
         validate_config: false,
         create_dirs: Vec::new(),
         remove_dirs_before: Vec::new(),
@@ -596,7 +568,7 @@ fn build_change_plan(
           before: Some(before),
           after: None,
           after_bytes: None,
-          redact: true,
+          redact: false,
           binary: false,
         }],
         warnings: Vec::new(),
@@ -623,8 +595,13 @@ fn build_change_plan(
           None => (None, None, false),
         };
         let redact = should_redact_toml(&target, &paths.user_configs_dir());
+        let is_config = target
+          .file_name()
+          .and_then(|name| name.to_str())
+          .map(|name| name.eq_ignore_ascii_case("config.toml"))
+          .unwrap_or(false);
         let binary = before_binary || after_binary;
-        if redact && target.file_name().and_then(|name| name.to_str()) == Some("config.toml") {
+        if is_config {
           validate_config = true;
         }
         files.push(FileChange {
@@ -1148,13 +1125,8 @@ fn user_config_path(paths: &AppPaths, name: &str) -> AppResult<PathBuf> {
   Ok(paths.user_configs_dir().join(format!("{}.toml", slug)))
 }
 
-fn should_redact_toml(path: &Path, user_configs_dir: &Path) -> bool {
-  let is_config = path
-    .file_name()
-    .and_then(|name| name.to_str())
-    .map(|name| name.eq_ignore_ascii_case("config.toml"))
-    .unwrap_or(false);
-  is_config || path.starts_with(user_configs_dir)
+fn should_redact_toml(_path: &Path, _user_configs_dir: &Path) -> bool {
+  false
 }
 
 fn is_allowed_skill_path(settings: &Settings, path: &Path) -> bool {
