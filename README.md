@@ -6,6 +6,17 @@ Codex files with a safety-first flow (diff preview, backups, atomic writes).
 
 ![Codex Manager dashboard](screenshots/Dashboard.jpg)
 
+## Features
+- Config editor with Simple (root scalars), Advanced (nested values), and raw TOML modes.
+- Diff preview before every change, plus automatic backups and restore.
+- Public Config Library with curated presets and apply previews.
+- My Configs: save personal presets and apply them later.
+- MCP Servers: toggle enabled state and add/update tables.
+- Skills: browse user/repo scopes, edit SKILL.md and text files, create/delete skills.
+- Public Skills (Clawdhub): search registry, preview SKILL.md/files, install via overlay/replace/sync.
+- Diagnostics panel for parse errors and missing paths.
+- Settings for CODEX_HOME and repo roots.
+
 ## Installation
 
 ### Prerequisites
@@ -76,11 +87,12 @@ All writes follow the same safety rails:
 
 ### Common actions
 - Dashboard: view health and diagnostics, load config quickly.
-- Config: edit root scalar keys or the raw TOML with diff preview.
+- Config: edit root scalar keys, advanced nested values, or raw TOML with diff preview.
 - Public Config Library: apply curated public configs (diff + backup).
 - My Configs: save your own presets (stored in app data) and apply them to config.
 - MCP Servers: toggle enabled, add/update server tables.
 - Skills: view user and repo skills, edit SKILL.md, create or delete skills.
+- Public Skills (Clawdhub): browse/search the Clawdhub registry, preview SKILL.md and files, then install via overlay/replace/sync.
 - Backups: review and restore from snapshots.
 
 ### Managing public presets
