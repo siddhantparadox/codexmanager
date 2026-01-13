@@ -50,6 +50,7 @@ const AppContext = createContext<AppStore | null>(null);
 const CONFIG_CHANGE_TYPES: ChangeRequest["type"][] = [
   "toggle_mcp_server",
   "set_config_scalar",
+  "set_config_path",
   "replace_config",
   "upsert_mcp_server",
   "delete_mcp_server",

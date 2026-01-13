@@ -209,9 +209,6 @@ pub fn scan_config(config_path: &Path) -> ConfigSummary {
   };
 
   for (key, value) in table.iter() {
-    if is_sensitive_key(key) {
-      continue;
-    }
     match value {
       toml::Value::String(inner) => summary.scalars.push(ConfigScalar {
         key: key.clone(),
@@ -553,14 +550,4 @@ fn hash_bytes(bytes: &[u8]) -> String {
   let mut hasher = Sha256::new();
   hasher.update(bytes);
   hex::encode(hasher.finalize())
-}
-
-fn is_sensitive_key(key: &str) -> bool {
-  let key = key.to_ascii_lowercase();
-  key.contains("token")
-    || key.contains("secret")
-    || key.contains("api_key")
-    || key.contains("apikey")
-    || key.contains("password")
-    || key.contains("bearer")
 }

@@ -1,4 +1,5 @@
 use serde::{Deserialize, Serialize};
+use serde_json::Value as JsonValue;
 
 #[derive(Debug, Serialize, Deserialize, Clone)]
 pub struct Settings {
@@ -137,6 +138,8 @@ pub struct ApplyResult {
 pub struct ConfigText {
   pub text: String,
   pub redacted: bool,
+  pub parsed: Option<JsonValue>,
+  pub parse_error: Option<String>,
 }
 
 #[derive(Debug, Serialize, Deserialize, Clone)]
@@ -176,6 +179,7 @@ impl Default for SkillFolderConfig {
 pub enum ChangeRequest {
   ToggleMcpServer { name: String, enabled: bool },
   SetConfigScalar { key: String, value: ScalarValue },
+  SetConfigPath { path: Vec<String>, value: ScalarValue },
   ReplaceConfig { content: String },
   UpsertMcpServer { name: String, table_toml: String },
   DeleteMcpServer { name: String },

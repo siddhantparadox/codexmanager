@@ -125,7 +125,17 @@ export type ApplyResult = {
 export type ConfigText = {
   text: string;
   redacted: boolean;
+  parsed?: JsonValue | null;
+  parse_error?: string | null;
 };
+
+export type JsonValue =
+  | string
+  | number
+  | boolean
+  | null
+  | JsonValue[]
+  | { [key: string]: JsonValue };
 
 export type ScalarValue = {
   kind: "string" | "integer" | "float" | "boolean";
@@ -148,6 +158,7 @@ export type InstallMode = "overlay" | "replace" | "sync";
 export type ChangeRequest =
   | { type: "toggle_mcp_server"; name: string; enabled: boolean }
   | { type: "set_config_scalar"; key: string; value: ScalarValue }
+  | { type: "set_config_path"; path: string[]; value: ScalarValue }
   | { type: "replace_config"; content: string }
   | { type: "upsert_mcp_server"; name: string; table_toml: string }
   | { type: "delete_mcp_server"; name: string }

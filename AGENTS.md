@@ -179,3 +179,6 @@ Include in PR description:
 - How is it backed up/restored?
 - Any security implications?
 - Tests added/updated
+
+## 13) README updates
+- If a code change is significant and user-facing, update `README.md` to reflect it.

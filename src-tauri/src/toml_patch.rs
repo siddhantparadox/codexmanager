@@ -22,6 +22,49 @@ pub fn set_root_scalar(input: &str, key: &str, scalar: ScalarValue) -> AppResult
   Ok(render_doc(input, &doc))
 }
 
+pub fn set_value_at_path(
+  input: &str,
+  path: &[String],
+  scalar: ScalarValue,
+) -> AppResult<String> {
+  if path.is_empty() {
+    return Err(AppError::new("path", "Path cannot be empty"));
+  }
+  let mut doc = parse_doc(input)?;
+  let mut current = doc.as_item_mut();
+  for (index, segment) in path.iter().enumerate() {
+    let is_last = index + 1 == path.len();
+    match current {
+      Item::Table(table) => {
+        if is_last {
+          let existing = table
+            .get(segment)
+            .ok_or_else(|| AppError::new("path_missing", "Config path not found"))?;
+          if existing.is_table() || existing.is_array_of_tables() {
+            return Err(AppError::new(
+              "path_invalid",
+              "Config path points to a table",
+            ));
+          }
+          table[segment] = scalar_to_item(scalar);
+          return Ok(render_doc(input, &doc));
+        }
+        let next = table
+          .get_mut(segment)
+          .ok_or_else(|| AppError::new("path_missing", "Config path not found"))?;
+        if !next.is_table() {
+          return Err(AppError::new("path_invalid", "Config path is not a table"));
+        }
+        current = next;
+      }
+      _ => {
+        return Err(AppError::new("path_invalid", "Config path is not a table"));
+      }
+    }
+  }
+  Err(AppError::new("path", "Unable to update config path"))
+}
+
 pub fn set_mcp_enabled(input: &str, name: &str, enabled: bool) -> AppResult<String> {
   let mut doc = parse_doc(input)?;
   let servers = doc
@@ -104,6 +147,15 @@ fn render_doc(input: &str, doc: &DocumentMut) -> String {
     }
   }
   output
+}
+
+fn scalar_to_item(scalar: ScalarValue) -> Item {
+  match scalar {
+    ScalarValue::String(inner) => value(inner),
+    ScalarValue::Integer(inner) => value(inner),
+    ScalarValue::Float(inner) => value(inner),
+    ScalarValue::Boolean(inner) => value(inner),
+  }
 }
 
 fn redact_item(item: &mut Item) {

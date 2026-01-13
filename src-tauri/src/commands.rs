@@ -94,9 +94,12 @@ pub fn read_config_text(app: AppHandle, state: State<Mutex<AppState>>) -> AppRes
     return Err(AppError::new("config_missing", "config.toml not found"));
   }
   let text = fs::read_text_file(&path)?;
+  let (parsed, parse_error) = parse_toml_json(&text);
   Ok(ConfigText {
     text,
     redacted: false,
+    parsed,
+    parse_error,
   })
 }
 
@@ -169,9 +172,12 @@ pub fn read_user_config_text(app: AppHandle, name: String) -> AppResult<ConfigTe
     return Err(AppError::new("config_missing", "Saved config not found"));
   }
   let text = fs::read_text_file(&path)?;
+  let (parsed, parse_error) = parse_toml_json(&text);
   Ok(ConfigText {
     text,
     redacted: false,
+    parsed,
+    parse_error,
   })
 }
 
@@ -290,6 +296,19 @@ fn build_change_plan(
       let after = toml_patch::set_root_scalar(&before, &key, value)?;
       Ok(single_file_plan(
         "set_config_scalar",
+        config_path,
+        before,
+        after,
+        true,
+        false,
+      ))
+    }
+    ChangeRequest::SetConfigPath { path, value } => {
+      ensure_config_exists(&config_path)?;
+      let before = fs::read_text_file(&config_path)?;
+      let after = toml_patch::set_value_at_path(&before, &path, value)?;
+      Ok(single_file_plan(
+        "set_config_path",
         config_path,
         before,
         after,
@@ -1127,6 +1146,16 @@ fn user_config_path(paths: &AppPaths, name: &str) -> AppResult<PathBuf> {
 
 fn should_redact_toml(_path: &Path, _user_configs_dir: &Path) -> bool {
   false
+}
+
+fn parse_toml_json(text: &str) -> (Option<serde_json::Value>, Option<String>) {
+  match text.parse::<toml::Value>() {
+    Ok(value) => match serde_json::to_value(value) {
+      Ok(json) => (Some(json), None),
+      Err(error) => (None, Some(error.to_string())),
+    },
+    Err(error) => (None, Some(error.to_string())),
+  }
 }
 
 fn is_allowed_skill_path(settings: &Settings, path: &Path) -> bool {

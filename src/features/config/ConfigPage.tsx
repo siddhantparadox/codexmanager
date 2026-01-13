@@ -1,5 +1,6 @@
-import { useEffect } from "react";
+import { useEffect, useState } from "react";
 import ScalarRow from "./components/ScalarRow";
+import ConfigTree from "./components/ConfigTree";
 import { useAppState } from "../../store/appStore";
 import type { ChangeRequest, ConfigScalar, ScalarValue } from "../../lib/types";
 
@@ -26,6 +27,7 @@ export default function ConfigPage() {
     openPreview,
     setError
   } = useAppState();
+  const [advancedFilter, setAdvancedFilter] = useState("");
 
   useEffect(() => {
     if (scan?.config.exists && !configText) {
@@ -40,7 +42,7 @@ export default function ConfigPage() {
           <h2>Simple view</h2>
           <span className="panel-meta">Root scalar keys only</span>
         </div>
-        <p className="panel-note">Sensitive keys are hidden here.</p>
+        <p className="panel-note">Root scalar keys only.</p>
         {!scan?.config.exists ? (
           <p className="ghost">No config.toml found.</p>
         ) : scan?.config.parse_error ? (
@@ -68,6 +70,50 @@ export default function ConfigPage() {
               />
             ))}
           </div>
+        )}
+      </div>
+
+      <div className="panel">
+        <div className="panel-header">
+          <h2>Advanced view</h2>
+          <span className="panel-meta">Structured tables</span>
+        </div>
+        <p className="panel-note">
+          Edit primitive values in place; preview each change before applying.
+        </p>
+        <div className="panel-tools filter-bar">
+          <input
+            value={advancedFilter}
+            onChange={(event) => setAdvancedFilter(event.target.value)}
+            placeholder="Filter keys (e.g. mcp_servers, features, projects)"
+          />
+          {advancedFilter ? (
+            <button
+              className="ghost-button small"
+              onClick={() => setAdvancedFilter("")}
+            >
+              Clear
+            </button>
+          ) : null}
+        </div>
+        {!scan?.config.exists ? (
+          <p className="ghost">No config.toml found.</p>
+        ) : scan?.config.parse_error ? (
+          <p className="card-warning">{scan.config.parse_error}</p>
+        ) : !configText ? (
+          <p className="ghost">Load config.toml to view structured data.</p>
+        ) : configText.parse_error ? (
+          <p className="card-warning">{configText.parse_error}</p>
+        ) : configText.parsed ? (
+          <ConfigTree
+            value={configText.parsed}
+            filter={advancedFilter}
+            onPreview={(path, value) =>
+              void openPreview({ type: "set_config_path", path, value })
+            }
+          />
+        ) : (
+          <p className="ghost">No structured data available.</p>
         )}
       </div>
 
