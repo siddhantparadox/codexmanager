@@ -51,8 +51,9 @@ npm run dev
 
 ### Build a release bundle
 ```bash
-npm run tauri build
+npm run tauri build -- --bundles nsis,msi
 ```
+Requires NSIS + WiX to produce the installers.
 
 ### Tests
 ```bash
