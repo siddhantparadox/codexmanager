@@ -16,13 +16,13 @@ jobs:
           - platform: windows-latest
             args: '--bundles nsis,msi'
           - platform: ubuntu-22.04
-            args: ''
+            args: '--bundles appimage,deb,rpm'
           - platform: macos-14
             target: aarch64-apple-darwin
-            args: '--target aarch64-apple-darwin'
+            args: '--target aarch64-apple-darwin --bundles dmg,app'
           - platform: macos-13
             target: x86_64-apple-darwin
-            args: '--target x86_64-apple-darwin'
+            args: '--target x86_64-apple-darwin --bundles dmg,app'
     runs-on: ${{ matrix.platform }}
     steps:
       - uses: actions/checkout@v4
