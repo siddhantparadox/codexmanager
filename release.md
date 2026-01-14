@@ -41,12 +41,13 @@ git push origin vX.Y.Z
 ```
 
 ## 6) Publish GitHub release
+Pushing the tag triggers the GitHub Actions release workflow. It builds all
+installers and creates a draft release with assets attached.
+
 ### UI flow
-1. GitHub → Releases → Draft a new release
-2. Tag: `vX.Y.Z`
-3. Title: `vX.Y.Z`
-4. Upload installers from `src-tauri/target/release/bundle/`
-5. Publish
+1. GitHub → Releases → open the new draft for `vX.Y.Z`
+2. Review assets and release notes
+3. Publish
 
 ### CLI flow (optional)
 ```bash
