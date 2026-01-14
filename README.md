@@ -17,6 +17,13 @@ Codex files with a safety-first flow (diff preview, backups, atomic writes).
 - Diagnostics panel for parse errors and missing paths.
 - Settings for CODEX_HOME and repo roots.
 
+## Supported platforms
+- Windows 10/11 (x64): NSIS + MSI installers.
+- macOS 14+ (arm64 + x64): DMG + app bundle (unsigned; Gatekeeper will warn on first open).
+- Linux (x64): AppImage + .deb + .rpm.
+
+Release builds are produced via GitHub Actions; download installers from Releases.
+
 ## Installation (local development)
 
 ### Prerequisites
@@ -50,10 +57,24 @@ npm run dev
 ```
 
 ### Build a release bundle
+Use the bundle formats that match your OS:
+
+Windows:
 ```bash
 npm run tauri build -- --bundles nsis,msi
 ```
-Requires NSIS + WiX to produce the installers.
+
+macOS:
+```bash
+npm run tauri build -- --bundles dmg,app
+```
+
+Linux:
+```bash
+npm run tauri build -- --bundles appimage,deb,rpm
+```
+
+Windows installers require NSIS + WiX.
 
 ### Tests
 ```bash
