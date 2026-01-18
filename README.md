@@ -8,7 +8,7 @@ Codex files with a safety-first flow (diff preview, backups, atomic writes).
 
 ## Features
 - Config editor with Simple (root scalars), Advanced (nested values), and raw TOML modes.
-- Diff preview before every change, plus automatic backups and restore.
+- Diff preview before every change (stacked/unified view), plus automatic backups and restore.
 - Public Config Library with curated presets and apply previews.
 - My Configs: save personal presets and apply them later.
 - MCP Servers: toggle enabled state and add/update tables.

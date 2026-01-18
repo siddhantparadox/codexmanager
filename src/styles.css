@@ -1266,14 +1266,27 @@ body::before {
   margin-bottom: 12px;
 }
 
-.diff {
-  background: #101715;
-  color: #f5f0e6;
-  padding: 16px;
+.diff-view {
+  background: #f6f1e7;
+  border: 1px solid rgba(30, 48, 43, 0.14);
   border-radius: 14px;
+  padding: 12px;
+  max-height: 55vh;
+  overflow: auto;
+}
+
+.diff-view diffs-container {
+  display: block;
+}
+
+.diff-empty {
+  background: #f6f1e7;
+  border: 1px dashed rgba(30, 48, 43, 0.24);
+  border-radius: 14px;
+  padding: 16px;
   font-family: var(--mono);
   font-size: 12px;
-  white-space: pre-wrap;
+  color: #3b4a44;
 }
 
 .warnings {

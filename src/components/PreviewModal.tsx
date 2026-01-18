@@ -1,9 +1,21 @@
+import { PatchDiff } from "@pierre/diffs/react";
+import { useMemo } from "react";
 import { useAppState } from "../store/appStore";
 
 export default function PreviewModal() {
   const { preview, applyPending, closePreview } = useAppState();
 
   if (!preview) return null;
+
+  const patch = preview.diff;
+  const hasDiff = patch.trim().length > 0;
+  const diffOptions = useMemo(
+    () => ({
+      diffStyle: "unified" as const,
+      themeType: "light" as const
+    }),
+    []
+  );
 
   return (
     <div className="modal">
@@ -21,7 +33,13 @@ export default function PreviewModal() {
             ))}
           </div>
         ) : null}
-        <pre className="diff">{preview.diff || "No changes."}</pre>
+        {hasDiff ? (
+          <div className="diff-view" role="region" aria-label="Diff preview">
+            <PatchDiff patch={patch} options={diffOptions} />
+          </div>
+        ) : (
+          <div className="diff-empty">No changes.</div>
+        )}
         <div className="modal-actions">
           <button className="ghost-button" onClick={closePreview}>
             Cancel
