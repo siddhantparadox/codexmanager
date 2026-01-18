@@ -1,4 +1,5 @@
 pub mod commands;
+pub mod codex_usage;
 pub mod errors;
 pub mod fs;
 pub mod models;
@@ -28,7 +29,8 @@ pub fn run() {
       commands::apply_change,
       commands::list_backups,
       commands::delete_backup,
-      commands::delete_all_backups
+      commands::delete_all_backups,
+      codex_usage::codex_get_usage_snapshot
     ])
     .run(tauri::generate_context!())
     .expect("error while running tauri application");

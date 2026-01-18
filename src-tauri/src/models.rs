@@ -252,3 +252,27 @@ pub struct BackupSummary {
   pub operation: String,
   pub files: usize,
 }
+
+#[derive(Debug, Serialize)]
+pub struct UsageWindowView {
+  pub used_percent: f64,
+  pub remaining_percent: f64,
+  pub window_seconds: Option<u64>,
+  pub resets_in_seconds: Option<u64>,
+  pub resets_in_human: Option<String>,
+}
+
+#[derive(Debug, Serialize)]
+pub struct CodexUsageSnapshot {
+  pub plan_type: Option<String>,
+  pub primary: Option<UsageWindowView>,
+  pub secondary: Option<UsageWindowView>,
+  pub code_review: Option<UsageWindowView>,
+  pub limit_reached: Option<bool>,
+  pub extras: Vec<(String, String)>,
+  pub auth_path: String,
+  pub auth_status: String,
+  pub login_method: String,
+  pub token_source: String,
+  pub last_refresh: Option<String>,
+}

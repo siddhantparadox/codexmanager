@@ -97,6 +97,28 @@ export type BackupSummary = {
   files: number;
 };
 
+export type UsageWindowView = {
+  used_percent: number;
+  remaining_percent: number;
+  window_seconds?: number;
+  resets_in_seconds?: number;
+  resets_in_human?: string;
+};
+
+export type CodexUsageSnapshot = {
+  plan_type?: string;
+  primary?: UsageWindowView;
+  secondary?: UsageWindowView;
+  code_review?: UsageWindowView;
+  limit_reached?: boolean;
+  extras: Array<[string, string]>;
+  auth_path: string;
+  auth_status: string;
+  login_method: string;
+  token_source: string;
+  last_refresh?: string;
+};
+
 export type ScanState = {
   settings: Settings;
   config: ConfigSummary;

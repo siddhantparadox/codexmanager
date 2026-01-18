@@ -3,6 +3,7 @@ import type {
   ApplyResult,
   BackupSummary,
   ChangeRequest,
+  CodexUsageSnapshot,
   ConfigText,
   PreviewResult,
   ScanState,
@@ -79,4 +80,10 @@ export async function deleteBackup(id: string): Promise<void> {
 
 export async function deleteAllBackups(): Promise<void> {
   return invoke("delete_all_backups");
+}
+
+export async function codexGetUsageSnapshot(
+  codexHome?: string
+): Promise<CodexUsageSnapshot> {
+  return invoke("codex_get_usage_snapshot", { codexHome: codexHome ?? null });
 }
