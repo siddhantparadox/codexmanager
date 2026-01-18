@@ -145,6 +145,22 @@ pub fn list_backups(backup_root: &Path) -> AppResult<Vec<BackupSummary>> {
   Ok(summaries)
 }
 
+pub fn delete_backup(backup_root: &Path, id: &str) -> AppResult<()> {
+  let path = backup_root.join(id);
+  if !path.exists() {
+    return Err(AppError::new("backup_missing", "Backup not found"));
+  }
+  fs::remove_dir_all(path)?;
+  Ok(())
+}
+
+pub fn delete_all_backups(backup_root: &Path) -> AppResult<()> {
+  if backup_root.exists() {
+    fs::remove_dir_all(backup_root)?;
+  }
+  Ok(())
+}
+
 pub fn load_backup_manifest(backup_root: &Path, id: &str) -> AppResult<BackupManifest> {
   let manifest_path = backup_root.join(id).join("manifest.json");
   if !manifest_path.exists() {

@@ -72,3 +72,11 @@ export async function applyChange(change: ChangeRequest): Promise<ApplyResult> {
 export async function listBackups(): Promise<BackupSummary[]> {
   return invoke("list_backups");
 }
+
+export async function deleteBackup(id: string): Promise<void> {
+  return invoke("delete_backup", { id });
+}
+
+export async function deleteAllBackups(): Promise<void> {
+  return invoke("delete_all_backups");
+}

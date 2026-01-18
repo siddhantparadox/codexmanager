@@ -249,6 +249,18 @@ pub fn list_backups(app: AppHandle) -> AppResult<Vec<crate::models::BackupSummar
   fs::list_backups(&paths.backups_dir())
 }
 
+#[tauri::command]
+pub fn delete_backup(app: AppHandle, id: String) -> AppResult<()> {
+  let paths = AppPaths::from_app(&app)?;
+  fs::delete_backup(&paths.backups_dir(), &id)
+}
+
+#[tauri::command]
+pub fn delete_all_backups(app: AppHandle) -> AppResult<()> {
+  let paths = AppPaths::from_app(&app)?;
+  fs::delete_all_backups(&paths.backups_dir())
+}
+
 struct ChangePlan {
   operation: String,
   files: Vec<FileChange>,

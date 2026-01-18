@@ -117,7 +117,7 @@ All writes follow the same safety rails:
 - MCP Servers: toggle enabled, add/update server tables.
 - Skills: view user and repo skills, edit SKILL.md, create or delete skills.
 - Public Skills (Clawdhub): browse/search the Clawdhub registry, preview SKILL.md and files, then install via overlay/replace/sync.
-- Backups: review and restore from snapshots.
+- Backups: review, restore, or delete snapshots.
 
 ### Managing public presets
 Public presets live in `src/features/config/data/publicConfigs.ts`. Add new entries there to

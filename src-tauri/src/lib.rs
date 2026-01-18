@@ -26,7 +26,9 @@ pub fn run() {
       commands::read_user_config_text,
       commands::preview_change,
       commands::apply_change,
-      commands::list_backups
+      commands::list_backups,
+      commands::delete_backup,
+      commands::delete_all_backups
     ])
     .run(tauri::generate_context!())
     .expect("error while running tauri application");
