@@ -276,3 +276,53 @@ pub struct CodexUsageSnapshot {
   pub token_source: String,
   pub last_refresh: Option<String>,
 }
+
+#[derive(Debug, Serialize, Clone, Default)]
+pub struct UsageTotals {
+  pub input_tokens: u64,
+  pub cached_input_tokens: u64,
+  pub output_tokens: u64,
+  pub reasoning_output_tokens: u64,
+  pub total_tokens: u64,
+}
+
+#[derive(Debug, Serialize, Clone)]
+pub struct UsageDailyPoint {
+  pub date: String,
+  pub total_tokens: u64,
+  pub input_tokens: u64,
+  pub cached_input_tokens: u64,
+  pub output_tokens: u64,
+  pub reasoning_output_tokens: u64,
+}
+
+#[derive(Debug, Serialize, Clone)]
+pub struct UsageBreakdown {
+  pub key: String,
+  pub totals: UsageTotals,
+}
+
+#[derive(Debug, Serialize, Clone)]
+pub struct CodexLocalUsageSummary {
+  pub year: i32,
+  pub year_total: UsageTotals,
+  pub started_on: Option<String>,
+  pub most_active_on: Option<String>,
+  pub most_active_total_tokens: u64,
+  pub streak_days: u64,
+  pub active_days_year: u64,
+  pub project_count_year: u64,
+  pub turn_events_scanned: u64,
+  pub today: UsageTotals,
+  pub last7: UsageTotals,
+  pub last30: UsageTotals,
+  pub daily_last365: Vec<UsageDailyPoint>,
+  pub by_model_last30: Vec<UsageBreakdown>,
+  pub by_project_last30: Vec<UsageBreakdown>,
+  pub by_model_year: Vec<UsageBreakdown>,
+  pub by_project_year: Vec<UsageBreakdown>,
+  pub sessions_path: String,
+  pub sessions_dir_exists: bool,
+  pub sessions_scanned: u64,
+  pub token_events_scanned: u64,
+}

@@ -15,7 +15,7 @@ Codex files with a safety-first flow (diff preview, backups, atomic writes).
 - Skills: browse user/repo scopes, edit SKILL.md and text files, create/delete skills.
 - Public Skills (Clawdhub): search registry, preview SKILL.md/files, install via overlay/replace/sync.
 - Diagnostics panel for parse errors and missing paths.
-- Settings for CODEX_HOME, repo roots, and Codex usage snapshot (plan + rate limit windows + auth status).
+- Settings for CODEX_HOME, repo roots, Codex usage snapshot (plan + rate limit windows + auth status), and local session analytics + wrapped summary from CODEX_HOME logs.
 
 ## Supported platforms
 - Windows 10/11 (x64): NSIS + MSI installers.

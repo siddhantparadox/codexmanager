@@ -119,6 +119,52 @@ export type CodexUsageSnapshot = {
   last_refresh?: string;
 };
 
+export type UsageTotals = {
+  input_tokens: number;
+  cached_input_tokens: number;
+  output_tokens: number;
+  reasoning_output_tokens: number;
+  total_tokens: number;
+};
+
+export type UsageDailyPoint = {
+  date: string;
+  total_tokens: number;
+  input_tokens: number;
+  cached_input_tokens: number;
+  output_tokens: number;
+  reasoning_output_tokens: number;
+};
+
+export type UsageBreakdown = {
+  key: string;
+  totals: UsageTotals;
+};
+
+export type CodexLocalUsageSummary = {
+  year: number;
+  year_total: UsageTotals;
+  started_on?: string | null;
+  most_active_on?: string | null;
+  most_active_total_tokens: number;
+  streak_days: number;
+  active_days_year: number;
+  project_count_year: number;
+  turn_events_scanned: number;
+  today: UsageTotals;
+  last7: UsageTotals;
+  last30: UsageTotals;
+  daily_last365: UsageDailyPoint[];
+  by_model_last30: UsageBreakdown[];
+  by_project_last30: UsageBreakdown[];
+  by_model_year: UsageBreakdown[];
+  by_project_year: UsageBreakdown[];
+  sessions_path: string;
+  sessions_dir_exists: boolean;
+  sessions_scanned: number;
+  token_events_scanned: number;
+};
+
 export type ScanState = {
   settings: Settings;
   config: ConfigSummary;

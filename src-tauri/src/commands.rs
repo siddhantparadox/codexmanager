@@ -3,6 +3,8 @@ use std::fs as std_fs;
 use std::path::{Path, PathBuf};
 use std::sync::Mutex;
 
+use base64::Engine;
+use rfd::FileDialog;
 use tauri::{AppHandle, State};
 
 use crate::errors::{AppError, AppResult};
@@ -162,6 +164,36 @@ pub fn list_public_skills(
 pub fn list_user_configs(app: AppHandle) -> AppResult<Vec<UserConfigSummary>> {
   let paths = AppPaths::from_app(&app)?;
   fs::list_user_configs(&paths.user_configs_dir())
+}
+
+#[tauri::command]
+pub fn export_wrapped_png(
+  data_url: String,
+  suggested_name: Option<String>,
+) -> AppResult<Option<String>> {
+  let data = data_url
+    .strip_prefix("data:image/png;base64,")
+    .ok_or_else(|| AppError::new("export_format", "Expected PNG data URL"))?;
+  let bytes = base64::engine::general_purpose::STANDARD
+    .decode(data)
+    .map_err(|err| AppError::new("export_decode", format!("Decode failed: {}", err)))?;
+
+  let mut dialog = FileDialog::new().add_filter("PNG Image", &["png"]);
+  if let Some(name) = suggested_name.filter(|value| !value.trim().is_empty()) {
+    let file_name = if name.to_lowercase().ends_with(".png") {
+      name
+    } else {
+      format!("{}.png", name)
+    };
+    dialog = dialog.set_file_name(file_name);
+  }
+
+  let Some(path) = dialog.save_file() else {
+    return Ok(None);
+  };
+
+  fs::write_atomic_bytes(&path, &bytes)?;
+  Ok(Some(path.to_string_lossy().to_string()))
 }
 
 #[tauri::command]

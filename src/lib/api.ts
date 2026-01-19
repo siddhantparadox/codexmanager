@@ -3,6 +3,7 @@ import type {
   ApplyResult,
   BackupSummary,
   ChangeRequest,
+  CodexLocalUsageSummary,
   CodexUsageSnapshot,
   ConfigText,
   PreviewResult,
@@ -82,8 +83,24 @@ export async function deleteAllBackups(): Promise<void> {
   return invoke("delete_all_backups");
 }
 
+export async function exportWrappedPng(
+  dataUrl: string,
+  suggestedName?: string
+): Promise<string | null> {
+  return invoke("export_wrapped_png", {
+    dataUrl,
+    suggestedName: suggestedName ?? null
+  });
+}
+
 export async function codexGetUsageSnapshot(
   codexHome?: string
 ): Promise<CodexUsageSnapshot> {
   return invoke("codex_get_usage_snapshot", { codexHome: codexHome ?? null });
+}
+
+export async function codexGetLocalUsageSummary(
+  codexHome?: string
+): Promise<CodexLocalUsageSummary> {
+  return invoke("codex_get_local_usage_summary", { codexHome: codexHome ?? null });
 }
