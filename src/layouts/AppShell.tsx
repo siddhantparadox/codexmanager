@@ -45,6 +45,12 @@ function pageMeta(pathname: string): PageMeta {
       subtitle: "Toggle servers and author new MCP entries."
     };
   }
+  if (pathname.startsWith("/chats")) {
+    return {
+      title: "Chats",
+      subtitle: "Local session history and in-app runner (Phase 0)."
+    };
+  }
   if (pathname.startsWith("/skills/public")) {
     return {
       title: "Public Skills",

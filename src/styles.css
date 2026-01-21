@@ -426,6 +426,67 @@ body::before {
   align-items: start;
 }
 
+.chat-layout {
+  min-height: 0;
+  align-items: start;
+}
+
+.chat-list .list-item {
+  text-align: left;
+  width: 100%;
+}
+
+.chat-detail .row-title {
+  font-size: 12px;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+}
+
+.chat-list-scroll {
+  max-height: clamp(360px, 65vh, 760px);
+  overflow-y: auto;
+  overflow-x: hidden;
+  scrollbar-gutter: stable;
+  scrollbar-width: thin;
+  scrollbar-color: rgba(31, 79, 63, 0.45) transparent;
+}
+
+.chat-list {
+  overflow-x: hidden;
+}
+
+.chat-list .list-row,
+.chat-list .row-body,
+.chat-list .row-actions {
+  min-width: 0;
+}
+
+.chat-list .row-title,
+.chat-list .row-meta {
+  overflow-wrap: anywhere;
+  word-break: break-word;
+}
+
+.chat-list-scroll::-webkit-scrollbar {
+  width: 8px;
+}
+
+.chat-list-scroll::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+.chat-list-scroll::-webkit-scrollbar-thumb {
+  background: rgba(31, 79, 63, 0.35);
+  border-radius: 999px;
+  border: 2px solid transparent;
+  background-clip: padding-box;
+}
+
+.chat-list-scroll::-webkit-scrollbar-thumb:hover {
+  background: rgba(31, 79, 63, 0.55);
+  border-color: transparent;
+}
+
 .skills-layout > .panel:not(.span-full) {
   height: clamp(520px, 70vh, 820px);
 }

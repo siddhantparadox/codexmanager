@@ -1,8 +1,9 @@
 # Codex Manager (Tauri)
 
 Codex Manager is a desktop configuration and asset manager for OpenAI Codex.
-It does not run Codex sessions or execute arbitrary commands. It edits and organizes on-disk
-Codex files with a safety-first flow (diff preview, backups, atomic writes).
+It edits and organizes on-disk Codex files with a safety-first flow (diff preview, backups, atomic writes),
+surfaces local session history from CODEX_HOME, and includes an in-app Codex chat runner with optional
+terminal access for advanced workflows.
 
 ![Codex Manager dashboard](screenshots/Dashboard.jpg)
 
@@ -16,6 +17,7 @@ Codex files with a safety-first flow (diff preview, backups, atomic writes).
 - Public Skills (Clawdhub): search registry, preview SKILL.md/files, install via overlay/replace/sync.
 - Diagnostics panel for parse errors and missing paths.
 - Settings for CODEX_HOME, repo roots, Codex usage snapshot (plan + rate limit windows + auth status), and local session analytics + wrapped summary from CODEX_HOME logs.
+- Chats: local session history with transcript view, resume/copy actions, and in-app chat runner.
 
 ## Supported platforms
 - Windows 10/11 (x64): NSIS + MSI installers.
@@ -101,6 +103,7 @@ Canonical sources of truth are on disk:
 - `REPO_ROOT/.codex/skills/**`
 - `CODEX_HOME/prompts/**`
 - `CODEX_HOME/rules/*.rules`
+- `CODEX_HOME/sessions/**` (read-only history)
 
 ### Editing flow
 All writes follow the same safety rails:
@@ -136,4 +139,3 @@ User-created presets are stored in the app data directory under `user-configs/`.
 
 ## Notes
 - Raw config editors and previews show full values; handle secrets with care.
-- The app only runs a small allowlist of Codex CLI management commands (optional).

@@ -9,10 +9,11 @@ use tauri::{AppHandle, State};
 
 use crate::errors::{AppError, AppResult};
 use crate::fs;
+use crate::chat_sessions;
 use crate::models::{
-  ApplyResult, ChangeRequest, ConfigText, Diagnostic, InstallMode, PreviewFile, PreviewResult,
-  RemoteSkillDetail, RemoteSkillPage, ScanState, Settings, SkillFileEntry, SkillFolderSpec,
-  SkillScope, UserConfigSummary,
+  ApplyResult, ChangeRequest, ChatSessionSummary, ChatSessionsResponse, ConfigText, Diagnostic,
+  InstallMode, PreviewFile, PreviewResult, RemoteSkillDetail, RemoteSkillPage, ScanState, Settings,
+  SkillFileEntry, SkillFolderSpec, SkillScope, UserConfigSummary,
 };
 use crate::paths::{
   config_path, is_within_root, repo_skills_root, resolve_codex_home, sanitize_config_name,
@@ -84,6 +85,39 @@ pub fn scan_state(app: AppHandle, state: State<Mutex<AppState>>) -> AppResult<Sc
     skills,
     diagnostics,
     backups,
+  })
+}
+
+#[tauri::command]
+pub fn chat_sessions_list(app: AppHandle, state: State<Mutex<AppState>>) -> AppResult<ChatSessionsResponse> {
+  let settings = ensure_settings(&app, &state)?;
+  let codex_home = resolve_codex_home(&settings)?;
+  let sessions_dir = codex_home.join("sessions");
+  let sessions_dir_exists = sessions_dir.is_dir();
+  let sessions_path = sessions_dir.to_string_lossy().to_string();
+
+  let mut guard = state.lock().map_err(|_| AppError::new("state", "State lock failed"))?;
+  let (sessions, stats) = chat_sessions::index_sessions(&sessions_dir, Some(&mut guard.chat_cache))?;
+
+  let summaries = sessions
+    .into_iter()
+    .map(|session| ChatSessionSummary {
+      id: session.id,
+      first_ts: session.first_ts,
+      last_ts: session.last_ts,
+      message_count: session.message_count,
+      last_model: session.last_model,
+      last_cwd: session.last_cwd,
+    })
+    .collect();
+
+  Ok(ChatSessionsResponse {
+    sessions_path,
+    sessions_dir_exists,
+    sessions: summaries,
+    files_seen: stats.files_seen,
+    files_parsed: stats.files_parsed,
+    parse_errors: stats.parse_errors,
   })
 }
 

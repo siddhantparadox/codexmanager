@@ -18,6 +18,26 @@ pub struct ScanState {
 }
 
 #[derive(Debug, Serialize)]
+pub struct ChatSessionSummary {
+  pub id: String,
+  pub first_ts: Option<i64>,
+  pub last_ts: Option<i64>,
+  pub message_count: u64,
+  pub last_model: Option<String>,
+  pub last_cwd: Option<String>,
+}
+
+#[derive(Debug, Serialize)]
+pub struct ChatSessionsResponse {
+  pub sessions_path: String,
+  pub sessions_dir_exists: bool,
+  pub sessions: Vec<ChatSessionSummary>,
+  pub files_seen: usize,
+  pub files_parsed: usize,
+  pub parse_errors: usize,
+}
+
+#[derive(Debug, Serialize)]
 pub struct ConfigSummary {
   pub path: String,
   pub exists: bool,

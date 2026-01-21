@@ -165,6 +165,24 @@ export type CodexLocalUsageSummary = {
   token_events_scanned: number;
 };
 
+export type ChatSessionSummary = {
+  id: string;
+  first_ts?: number | null;
+  last_ts?: number | null;
+  message_count: number;
+  last_model?: string | null;
+  last_cwd?: string | null;
+};
+
+export type ChatSessionsResponse = {
+  sessions_path: string;
+  sessions_dir_exists: boolean;
+  sessions: ChatSessionSummary[];
+  files_seen: number;
+  files_parsed: number;
+  parse_errors: number;
+};
+
 export type ScanState = {
   settings: Settings;
   config: ConfigSummary;

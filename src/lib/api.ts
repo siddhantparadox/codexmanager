@@ -3,6 +3,7 @@ import type {
   ApplyResult,
   BackupSummary,
   ChangeRequest,
+  ChatSessionsResponse,
   CodexLocalUsageSummary,
   CodexUsageSnapshot,
   ConfigText,
@@ -103,4 +104,8 @@ export async function codexGetLocalUsageSummary(
   codexHome?: string
 ): Promise<CodexLocalUsageSummary> {
   return invoke("codex_get_local_usage_summary", { codexHome: codexHome ?? null });
+}
+
+export async function chatSessionsList(): Promise<ChatSessionsResponse> {
+  return invoke("chat_sessions_list");
 }

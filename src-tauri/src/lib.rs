@@ -1,4 +1,5 @@
 pub mod commands;
+pub mod chat_sessions;
 pub mod codex_usage;
 pub mod codex_usage_local;
 pub mod errors;
@@ -19,6 +20,7 @@ pub fn run() {
       commands::get_settings,
       commands::update_settings,
       commands::scan_state,
+      commands::chat_sessions_list,
       commands::read_config_text,
       commands::read_skill_text,
       commands::list_skill_files,
