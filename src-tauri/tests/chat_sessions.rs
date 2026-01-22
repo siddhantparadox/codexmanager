@@ -1,4 +1,6 @@
-use codex_manager::chat_sessions::{index_sessions, SessionIndexCache};
+use codex_manager::chat_sessions::{
+  index_sessions, session_messages_latest, session_messages_page, SessionIndexCache,
+};
 use std::path::Path;
 use time::format_description::well_known::Rfc3339;
 use time::OffsetDateTime;
@@ -7,11 +9,14 @@ use time::OffsetDateTime;
 fn parses_session_summary() {
   let fixtures = Path::new("tests/fixtures/sessions");
   let (sessions, stats) = index_sessions(fixtures, None).expect("index sessions");
-  assert_eq!(stats.files_seen, 1);
-  assert_eq!(stats.files_parsed, 1);
-  assert_eq!(sessions.len(), 1);
+  assert_eq!(stats.files_seen, 3);
+  assert_eq!(stats.files_parsed, 3);
+  assert_eq!(sessions.len(), 3);
 
-  let summary = &sessions[0];
+  let summary = sessions
+    .iter()
+    .find(|session| session.id == "basic")
+    .expect("basic session summary");
   assert_eq!(summary.id, "basic");
   assert_eq!(summary.message_count, 2);
   assert_eq!(summary.last_model.as_deref(), Some("gpt-5-codex"));
@@ -25,6 +30,61 @@ fn parses_session_summary() {
     .unix_timestamp();
   assert_eq!(summary.first_ts, Some(first));
   assert_eq!(summary.last_ts, Some(last));
+}
+
+#[test]
+fn paging_returns_contiguous_slices() {
+  let fixtures = Path::new("tests/fixtures/sessions");
+  let (latest, total, cursor) =
+    session_messages_latest(fixtures, "long", 2).expect("latest messages");
+  assert_eq!(total, 5);
+  assert_eq!(latest.len(), 2);
+  assert_eq!(latest[0].content, "m4");
+  assert_eq!(latest[1].content, "m5");
+  let cursor = cursor.expect("cursor");
+
+  let (older, _total, next_cursor) =
+    session_messages_page(fixtures, "long", cursor, 2).expect("older messages");
+  assert_eq!(older.len(), 2);
+  assert_eq!(older[0].content, "m2");
+  assert_eq!(older[1].content, "m3");
+
+  let next_cursor = next_cursor.expect("next cursor");
+  let (oldest, _total, final_cursor) =
+    session_messages_page(fixtures, "long", next_cursor, 2).expect("oldest messages");
+  assert_eq!(oldest.len(), 1);
+  assert_eq!(oldest[0].content, "m1");
+  assert!(final_cursor.is_none());
+}
+
+#[test]
+fn index_sessions_on_empty_dir_returns_empty() {
+  let temp = tempfile::tempdir().expect("tempdir");
+  let (sessions, stats) = index_sessions(temp.path(), None).expect("index sessions");
+  assert!(sessions.is_empty());
+  assert_eq!(stats.files_seen, 0);
+  assert_eq!(stats.files_parsed, 0);
+}
+
+#[test]
+fn captures_tool_metadata() {
+  let fixtures = Path::new("tests/fixtures/sessions");
+  let (latest, _total, _cursor) =
+    session_messages_latest(fixtures, "tool", 10).expect("latest messages");
+
+  let assistant = latest
+    .iter()
+    .find(|message| message.role == "assistant")
+    .expect("assistant message");
+  assert_eq!(assistant.tool_name.as_deref(), Some("search"));
+  assert_eq!(assistant.tool_call_id.as_deref(), Some("call_1"));
+
+  let tool = latest
+    .iter()
+    .find(|message| message.role == "tool")
+    .expect("tool message");
+  assert_eq!(tool.tool_name.as_deref(), Some("search"));
+  assert_eq!(tool.tool_call_id.as_deref(), Some("call_1"));
 }
 
 #[test]
@@ -54,4 +114,31 @@ fn cache_skips_unchanged_files() {
 
   let (_sessions_third, stats_third) = index_sessions(temp.path(), Some(&mut cache)).unwrap();
   assert_eq!(stats_third.files_parsed, 1);
+}
+
+#[test]
+fn loads_latest_messages_and_pages_older() {
+  let fixtures = Path::new("tests/fixtures/sessions");
+  let (latest, total, cursor) =
+    session_messages_latest(fixtures, "basic", 1).expect("latest messages");
+  assert_eq!(total, 2);
+  assert_eq!(latest.len(), 1);
+  assert_eq!(latest[0].role, "assistant");
+  assert!(cursor.is_some());
+
+  let (older, _total, next_cursor) =
+    session_messages_page(fixtures, "basic", cursor.unwrap(), 10).expect("older messages");
+  assert_eq!(older.len(), 1);
+  assert_eq!(older[0].role, "user");
+  assert!(next_cursor.is_none());
+}
+
+#[test]
+fn index_sessions_on_missing_dir_returns_empty() {
+  let temp = tempfile::tempdir().expect("tempdir");
+  let missing = temp.path().join("missing");
+  let (sessions, stats) = index_sessions(&missing, None).expect("index sessions");
+  assert!(sessions.is_empty());
+  assert_eq!(stats.files_seen, 0);
+  assert_eq!(stats.files_parsed, 0);
 }

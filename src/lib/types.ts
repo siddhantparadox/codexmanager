@@ -172,6 +172,12 @@ export type ChatSessionSummary = {
   message_count: number;
   last_model?: string | null;
   last_cwd?: string | null;
+  title?: string | null;
+  draft?: string | null;
+  pinned: boolean;
+  archived: boolean;
+  last_read_ts?: number | null;
+  has_unread: boolean;
 };
 
 export type ChatSessionsResponse = {
@@ -181,6 +187,23 @@ export type ChatSessionsResponse = {
   files_seen: number;
   files_parsed: number;
   parse_errors: number;
+};
+
+export type ChatMessage = {
+  id: string;
+  role: string;
+  content: string;
+  timestamp?: number | null;
+  tool_name?: string | null;
+  tool_call_id?: string | null;
+  tool_status?: string | null;
+};
+
+export type ChatMessagesPage = {
+  session_id: string;
+  total_count: number;
+  next_cursor?: number | null;
+  messages: ChatMessage[];
 };
 
 export type ScanState = {

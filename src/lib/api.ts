@@ -3,6 +3,7 @@ import type {
   ApplyResult,
   BackupSummary,
   ChangeRequest,
+  ChatMessagesPage,
   ChatSessionsResponse,
   CodexLocalUsageSummary,
   CodexUsageSnapshot,
@@ -108,4 +109,43 @@ export async function codexGetLocalUsageSummary(
 
 export async function chatSessionsList(): Promise<ChatSessionsResponse> {
   return invoke("chat_sessions_list");
+}
+
+export async function chatOverlaySet(
+  sessionId: string,
+  updates: {
+    pinned?: boolean;
+    archived?: boolean;
+    lastReadTs?: number;
+    title?: string | null;
+    draft?: string | null;
+  }
+): Promise<void> {
+  return invoke("chat_overlay_set", {
+    sessionId,
+    pinned: updates.pinned ?? null,
+    archived: updates.archived ?? null,
+    lastReadTs: updates.lastReadTs ?? null,
+    title: updates.title ?? null,
+    draft: updates.draft ?? null
+  });
+}
+
+export async function chatSessionLatest(
+  sessionId: string,
+  limit?: number
+): Promise<ChatMessagesPage> {
+  return invoke("chat_session_latest", { sessionId, limit: limit ?? null });
+}
+
+export async function chatSessionPage(
+  sessionId: string,
+  cursor: number,
+  limit?: number
+): Promise<ChatMessagesPage> {
+  return invoke("chat_session_page", {
+    sessionId,
+    cursor,
+    limit: limit ?? null
+  });
 }

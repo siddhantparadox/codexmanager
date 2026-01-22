@@ -25,6 +25,12 @@ pub struct ChatSessionSummary {
   pub message_count: u64,
   pub last_model: Option<String>,
   pub last_cwd: Option<String>,
+  pub title: Option<String>,
+  pub draft: Option<String>,
+  pub pinned: bool,
+  pub archived: bool,
+  pub last_read_ts: Option<i64>,
+  pub has_unread: bool,
 }
 
 #[derive(Debug, Serialize)]
@@ -35,6 +41,28 @@ pub struct ChatSessionsResponse {
   pub files_seen: usize,
   pub files_parsed: usize,
   pub parse_errors: usize,
+}
+
+#[derive(Debug, Serialize, Clone)]
+pub struct ChatMessage {
+  pub id: String,
+  pub role: String,
+  pub content: String,
+  pub timestamp: Option<i64>,
+  #[serde(skip_serializing_if = "Option::is_none")]
+  pub tool_name: Option<String>,
+  #[serde(skip_serializing_if = "Option::is_none")]
+  pub tool_call_id: Option<String>,
+  #[serde(skip_serializing_if = "Option::is_none")]
+  pub tool_status: Option<String>,
+}
+
+#[derive(Debug, Serialize)]
+pub struct ChatMessagesPage {
+  pub session_id: String,
+  pub total_count: usize,
+  pub next_cursor: Option<usize>,
+  pub messages: Vec<ChatMessage>,
 }
 
 #[derive(Debug, Serialize)]

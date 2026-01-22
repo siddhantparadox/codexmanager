@@ -1,0 +1,3 @@
+{"timestamp":"2026-01-05T10:00:00Z","type":"turn_context","payload":{"cwd":"C:/repo","model":"gpt-5-codex"}}
+{"timestamp":"2026-01-05T10:00:05Z","type":"event_msg","payload":{"role":"assistant","content":[{"type":"tool_call","name":"search","id":"call_1","input":"query"}]}}
+{"timestamp":"2026-01-05T10:00:06Z","type":"event_msg","payload":{"role":"tool","tool_name":"search","tool_call_id":"call_1","content":"result"}}

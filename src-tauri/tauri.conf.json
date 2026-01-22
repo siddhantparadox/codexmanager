@@ -24,6 +24,7 @@
         "title": "Codex Manager",
         "width": 1280,
         "height": 820,
+        "maximized": true,
         "minWidth": 960,
         "minHeight": 640
       }

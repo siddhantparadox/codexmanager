@@ -48,7 +48,7 @@ function pageMeta(pathname: string): PageMeta {
   if (pathname.startsWith("/chats")) {
     return {
       title: "Chats",
-      subtitle: "Local session history and in-app runner (Phase 0)."
+      subtitle: "Local session history and in-app runner (Phase 1)."
     };
   }
   if (pathname.startsWith("/skills/public")) {

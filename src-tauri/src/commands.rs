@@ -9,11 +9,12 @@ use tauri::{AppHandle, State};
 
 use crate::errors::{AppError, AppResult};
 use crate::fs;
+use crate::chat_overlays::{load_overlays, save_overlays, ChatOverlay};
 use crate::chat_sessions;
 use crate::models::{
-  ApplyResult, ChangeRequest, ChatSessionSummary, ChatSessionsResponse, ConfigText, Diagnostic,
-  InstallMode, PreviewFile, PreviewResult, RemoteSkillDetail, RemoteSkillPage, ScanState, Settings,
-  SkillFileEntry, SkillFolderSpec, SkillScope, UserConfigSummary,
+  ApplyResult, ChangeRequest, ChatMessagesPage, ChatSessionSummary, ChatSessionsResponse, ConfigText,
+  Diagnostic, InstallMode, PreviewFile, PreviewResult, RemoteSkillDetail, RemoteSkillPage,
+  ScanState, Settings, SkillFileEntry, SkillFolderSpec, SkillScope, UserConfigSummary,
 };
 use crate::paths::{
   config_path, is_within_root, repo_skills_root, resolve_codex_home, sanitize_config_name,
@@ -95,19 +96,40 @@ pub fn chat_sessions_list(app: AppHandle, state: State<Mutex<AppState>>) -> AppR
   let sessions_dir = codex_home.join("sessions");
   let sessions_dir_exists = sessions_dir.is_dir();
   let sessions_path = sessions_dir.to_string_lossy().to_string();
+  let paths = AppPaths::from_app(&app)?;
+  let overlay_store = load_overlays(&paths.chat_overlays_path()).unwrap_or_default();
 
   let mut guard = state.lock().map_err(|_| AppError::new("state", "State lock failed"))?;
   let (sessions, stats) = chat_sessions::index_sessions(&sessions_dir, Some(&mut guard.chat_cache))?;
 
   let summaries = sessions
     .into_iter()
-    .map(|session| ChatSessionSummary {
-      id: session.id,
-      first_ts: session.first_ts,
-      last_ts: session.last_ts,
-      message_count: session.message_count,
-      last_model: session.last_model,
-      last_cwd: session.last_cwd,
+    .map(|session| {
+      let overlay = overlay_store.items.get(&session.id);
+      let pinned = overlay.map(|o| o.pinned).unwrap_or(false);
+      let archived = overlay.map(|o| o.archived).unwrap_or(false);
+      let last_read_ts = overlay.and_then(|o| o.last_read_ts);
+      let title = overlay.and_then(|o| o.title.clone());
+      let draft = overlay.and_then(|o| o.draft.clone());
+      let has_unread = match (session.last_ts, last_read_ts) {
+        (Some(last_ts), Some(last_read_ts)) => last_ts > last_read_ts,
+        (Some(_), None) => true,
+        _ => false,
+      };
+      ChatSessionSummary {
+        id: session.id,
+        first_ts: session.first_ts,
+        last_ts: session.last_ts,
+        message_count: session.message_count,
+        last_model: session.last_model,
+        last_cwd: session.last_cwd,
+        title,
+        draft,
+        pinned,
+        archived,
+        last_read_ts,
+        has_unread,
+      }
     })
     .collect();
 
@@ -118,6 +140,100 @@ pub fn chat_sessions_list(app: AppHandle, state: State<Mutex<AppState>>) -> AppR
     files_seen: stats.files_seen,
     files_parsed: stats.files_parsed,
     parse_errors: stats.parse_errors,
+  })
+}
+
+#[tauri::command]
+pub fn chat_overlay_set(
+  app: AppHandle,
+  session_id: String,
+  pinned: Option<bool>,
+  archived: Option<bool>,
+  last_read_ts: Option<i64>,
+  title: Option<String>,
+  draft: Option<String>,
+) -> AppResult<()> {
+  let paths = AppPaths::from_app(&app)?;
+  let path = paths.chat_overlays_path();
+  let mut store = load_overlays(&path)?;
+  let entry = store
+    .items
+    .entry(session_id)
+    .or_insert_with(ChatOverlay::default);
+  if let Some(value) = pinned {
+    entry.pinned = value;
+  }
+  if let Some(value) = archived {
+    entry.archived = value;
+  }
+  if let Some(value) = last_read_ts {
+    entry.last_read_ts = Some(value);
+  }
+  if let Some(value) = title {
+    let trimmed = value.trim();
+    entry.title = if trimmed.is_empty() {
+      None
+    } else {
+      Some(value)
+    };
+  }
+  if let Some(value) = draft {
+    let trimmed = value.trim();
+    entry.draft = if trimmed.is_empty() {
+      None
+    } else {
+      Some(value)
+    };
+  }
+  if store.version == 0 {
+    store.version = 1;
+  }
+  save_overlays(&path, &store)?;
+  Ok(())
+}
+
+#[tauri::command]
+pub fn chat_session_latest(
+  app: AppHandle,
+  state: State<Mutex<AppState>>,
+  session_id: String,
+  limit: Option<usize>,
+) -> AppResult<ChatMessagesPage> {
+  let settings = ensure_settings(&app, &state)?;
+  let codex_home = resolve_codex_home(&settings)?;
+  let sessions_dir = codex_home.join("sessions");
+  let limit = limit.unwrap_or(100).clamp(1, 500);
+  let (messages, total, next_cursor) =
+    chat_sessions::session_messages_latest(&sessions_dir, &session_id, limit)?;
+
+  Ok(ChatMessagesPage {
+    session_id,
+    total_count: total,
+    next_cursor,
+    messages,
+  })
+}
+
+#[tauri::command]
+pub fn chat_session_page(
+  app: AppHandle,
+  state: State<Mutex<AppState>>,
+  session_id: String,
+  cursor: usize,
+  limit: Option<usize>,
+) -> AppResult<ChatMessagesPage> {
+  let settings = ensure_settings(&app, &state)?;
+  let codex_home = resolve_codex_home(&settings)?;
+  let sessions_dir = codex_home.join("sessions");
+  let limit = limit.unwrap_or(100).clamp(1, 500);
+  let (messages, total, next_cursor) =
+    chat_sessions::session_messages_page(&sessions_dir, &session_id, cursor, limit)?;
+
+  Ok(ChatMessagesPage {
+    session_id,
+    total_count: total,
+    next_cursor,
+    messages,
   })
 }
 
