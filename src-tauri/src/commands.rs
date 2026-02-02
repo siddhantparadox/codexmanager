@@ -539,13 +539,24 @@ pub fn apply_change(
   }
 
   if plan.validate_config {
-    let config_path = config_path(&resolve_codex_home(&settings)?);
-    let text = fs::read_text_file(&config_path)?;
-    let parse_result: Result<toml::Value, _> = text.parse();
-    if let Err(error) = parse_result {
-      let _ = fs::restore_backup(&paths.backups_dir(), &backup.id);
-      cleanup_created_dirs(&plan.create_dirs);
-      return Err(AppError::new("toml_parse", error.to_string()));
+    for file in &plan.files {
+      if file.binary {
+        continue;
+      }
+      match file.path.extension().and_then(|value| value.to_str()) {
+        Some("toml") => {}
+        _ => continue,
+      }
+      let text = fs::read_text_file(&file.path)?;
+      let parse_result: Result<toml::Value, _> = text.parse();
+      if let Err(error) = parse_result {
+        let _ = fs::restore_backup(&paths.backups_dir(), &backup.id);
+        cleanup_created_dirs(&plan.create_dirs);
+        return Err(AppError::new(
+          "toml_parse",
+          format!("{}: {}", file.path.display(), error),
+        ));
+      }
     }
   }
 

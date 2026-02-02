@@ -17,7 +17,7 @@ terminal access for advanced workflows.
 - Public Skills (Clawdhub): search registry, preview SKILL.md/files, install via overlay/replace/sync.
 - Diagnostics panel for parse errors and missing paths.
 - Settings for CODEX_HOME, repo roots, Codex usage snapshot (plan + rate limit windows + auth status), and local session analytics + wrapped summary from CODEX_HOME logs.
-- Chats: local session history with transcript view, resume/copy actions, and an in-app chat runner that writes workspace-scoped overrides to `.codex/config.toml` on copy/run.
+- Chats: searchable session history (pin/archive), transcript paging, copy full ID + resume command, and a new chat workflow that can write workspace-scoped overrides to `.codex/config.toml` on copy.
 
 ## Supported platforms
 - Windows 10/11 (x64): NSIS + MSI installers.
@@ -93,7 +93,7 @@ Includes:
 
 ### First run setup
 1) Open Settings and set CODEX_HOME (or ensure the `CODEX_HOME` env var is set).
-2) Add any repo roots that contain `.codex/skills` for repo-scoped skills.
+2) Add any repo roots that contain `.codex/skills` for repo-scoped skills (also enables workspace defaults in Chats).
 3) Return to Dashboard and click "Refresh scan" if needed.
 
 ### What the app manages
@@ -104,6 +104,7 @@ Canonical sources of truth are on disk:
 - `CODEX_HOME/prompts/**`
 - `CODEX_HOME/rules/*.rules`
 - `CODEX_HOME/sessions/**` (read-only history)
+- `WORKSPACE/.codex/config.toml` (workspace-scoped overrides from Chats)
 
 ### Editing flow
 All writes follow the same safety rails:
@@ -121,6 +122,7 @@ All writes follow the same safety rails:
 - Skills: view user and repo skills, edit SKILL.md, create or delete skills.
 - Public Skills (Clawdhub): browse/search the Clawdhub registry, preview SKILL.md and files, then install via overlay/replace/sync.
 - Backups: review, restore, or delete snapshots.
+- Chats: review local sessions, pin/archive, copy resume command, and start new chats with workspace defaults.
 
 ### Managing public presets
 Public presets live in `src/features/config/data/publicConfigs.ts`. Add new entries there to

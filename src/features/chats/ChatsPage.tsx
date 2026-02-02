@@ -5,7 +5,6 @@ import {
   chatSessionPage,
   chatSessionsList,
   codexBuildCommand,
-  codexRunCommand,
   readWorkspaceConfigText,
   workspacesList,
   workspacesUpsert
@@ -121,7 +120,7 @@ type WorkspaceOverridesDraft = {
 
 type OverrideKey = keyof WorkspaceOverridesDraft;
 
-type PendingAction = "copy" | "run" | null;
+type PendingAction = "copy" | null;
 type WorkspaceConfigIssue =
   | "not_registered"
   | "not_found"
@@ -277,7 +276,6 @@ export default function ChatsPage() {
   const [copyNotice, setCopyNotice] = useState<string | null>(null);
   const [resumeNotice, setResumeNotice] = useState<string | null>(null);
   const [resumeError, setResumeError] = useState<string | null>(null);
-  const [resumeBusy, setResumeBusy] = useState(false);
   const [workspaces, setWorkspaces] = useState<WorkspaceEntry[]>([]);
   const [newChatOpen, setNewChatOpen] = useState(false);
   const [workspaceChoice, setWorkspaceChoice] = useState("custom");
@@ -516,7 +514,7 @@ export default function ChatsPage() {
   const buildResumeRequest = useCallback(
     (session: ChatSessionSummary): CodexCommandRequest => ({
       kind: "resume",
-      session_id: session.id,
+      session_id: formatSessionLabel(session.id),
       options: {
         cwd: session.last_cwd ?? undefined,
         model: session.last_model ?? undefined
@@ -565,28 +563,6 @@ export default function ChatsPage() {
       window.setTimeout(() => setResumeNotice(null), 2000);
     } catch (err) {
       setResumeError(normalizeError(err));
-    }
-  }, [buildResumeRequest, selected]);
-
-  const openResumeInCli = useCallback(async () => {
-    if (!selected) return;
-    setResumeError(null);
-    setResumeNotice(null);
-    setResumeBusy(true);
-    try {
-      const result = await codexRunCommand(buildResumeRequest(selected), 20_000);
-      if (result.timed_out) {
-        setResumeError("Resume command timed out.");
-      } else if (result.exit_code && result.exit_code !== 0) {
-        setResumeError(result.stderr || "Resume command failed.");
-      } else {
-        setResumeNotice("Resume command finished.");
-        window.setTimeout(() => setResumeNotice(null), 2000);
-      }
-    } catch (err) {
-      setResumeError(normalizeError(err));
-    } finally {
-      setResumeBusy(false);
     }
   }, [buildResumeRequest, selected]);
 
@@ -873,21 +849,7 @@ export default function ChatsPage() {
     }
   }, [buildNewChatRequest, persistWorkspace]);
 
-  const performRunCommand = useCallback(async () => {
-    setCommandError(null);
-    setCommandBusy(true);
-    try {
-      await codexRunCommand(buildNewChatRequest(), 20_000);
-      await persistWorkspace();
-    } catch (err) {
-      setCommandError(normalizeError(err));
-    } finally {
-      setCommandBusy(false);
-    }
-  }, [buildNewChatRequest, persistWorkspace]);
-
-  const requestCommandAction = useCallback(
-    async (action: Exclude<PendingAction, null>) => {
+  const requestCopyCommand = useCallback(async () => {
       const trimmed = workspacePath.trim();
       setCommandError(null);
       if (!trimmed) {
@@ -900,14 +862,10 @@ export default function ChatsPage() {
         !workspaceConfigIssue &&
         !workspaceConfigText?.parse_error;
       if (!changes.length || !canSaveOverrides) {
-        if (action === "copy") {
-          await performCopyCommand();
-        } else {
-          await performRunCommand();
-        }
+        await performCopyCommand();
         return;
       }
-      setPendingAction(action);
+      setPendingAction("copy");
       setPendingActionAt(lastAppliedAt);
       const ok = await openPreview({
         type: "set_workspace_config_paths",
@@ -918,18 +876,15 @@ export default function ChatsPage() {
         setPendingAction(null);
         setCommandError("Unable to preview workspace overrides.");
       }
-    },
-    [
+    }, [
       buildOverridesChanges,
       lastAppliedAt,
       openPreview,
       performCopyCommand,
-      performRunCommand,
       workspaceConfigIssue,
       workspaceConfigText?.parse_error,
       workspacePath
-    ]
-  );
+    ]);
 
   useEffect(() => {
     if (!pendingAction) return;
@@ -942,15 +897,12 @@ export default function ChatsPage() {
     setPendingAction(null);
     if (action === "copy") {
       void performCopyCommand();
-    } else if (action === "run") {
-      void performRunCommand();
     }
   }, [
     lastAppliedAt,
     pendingAction,
     pendingActionAt,
     performCopyCommand,
-    performRunCommand,
     preview
   ]);
 
@@ -1178,14 +1130,6 @@ export default function ChatsPage() {
                   <button
                     type="button"
                     className="ghost-button small"
-                    onClick={() => void openResumeInCli()}
-                    disabled={!selected || resumeBusy}
-                  >
-                    {resumeBusy ? "Opening..." : "Open in CLI"}
-                  </button>
-                  <button
-                    type="button"
-                    className="ghost-button small"
                     onClick={() => {
                       if (!selected) return;
                       setOverlayBusy(true);
@@ -1408,7 +1352,7 @@ export default function ChatsPage() {
                     {globalConfigPath} stay unchanged.
                   </p>
                   <p className="panel-note">
-                    Overrides are saved when you copy the command or open the CLI.
+                    Overrides are saved when you copy the command.
                   </p>
                 </div>
               </div>
@@ -1566,7 +1510,7 @@ export default function ChatsPage() {
                 <button
                   type="button"
                   className="ghost-button"
-                  onClick={() => void requestCommandAction("copy")}
+                  onClick={() => void requestCopyCommand()}
                   disabled={commandBusy || !workspacePath.trim()}
                 >
                   Copy
@@ -1579,13 +1523,6 @@ export default function ChatsPage() {
             <div className="modal-actions new-chat-actions">
               <button className="ghost-button" onClick={() => setNewChatOpen(false)}>
                 Cancel
-              </button>
-              <button
-                className="primary"
-                onClick={() => void requestCommandAction("run")}
-                disabled={commandBusy || !workspacePath.trim()}
-              >
-                {commandBusy ? "Launching..." : "Open in CLI"}
               </button>
             </div>
           </div>

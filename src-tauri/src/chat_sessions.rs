@@ -46,11 +46,12 @@ pub fn session_messages_page(
   let path = find_session_path(sessions_dir, session_id)?;
   let messages = load_session_messages(&path)?;
   let total = messages.len();
-  if cursor == 0 {
+  let clamped_cursor = cursor.min(total);
+  if clamped_cursor == 0 {
     return Ok((Vec::new(), total, None));
   }
-  let start = cursor.saturating_sub(limit);
-  let slice = messages[start..cursor.min(total)].to_vec();
+  let start = clamped_cursor.saturating_sub(limit);
+  let slice = messages[start..clamped_cursor].to_vec();
   let next_cursor = if start > 0 { Some(start) } else { None };
   Ok((slice, total, next_cursor))
 }
