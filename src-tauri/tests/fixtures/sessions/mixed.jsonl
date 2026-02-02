@@ -1,0 +1,7 @@
+{"timestamp":"2026-02-01T00:00:00Z","type":"event_msg","payload":{"role":"user","content":"hi"}}
+{"timestamp":"2026-02-01T00:00:01Z","type":"event_msg","payload":{"role":"assistant","content":"hello"}}
+{"timestamp":"2026-02-01T00:00:02Z","type":"event_msg","payload":{"type":"agent_reasoning","text":"**Thinking about next steps**"}}
+{"timestamp":"2026-02-01T00:00:03Z","type":"response_item","payload":{"type":"function_call","name":"exec_command","arguments":"{\"cmd\":\"ls\"}","call_id":"call_1"}}
+{"timestamp":"2026-02-01T00:00:04Z","type":"response_item","payload":{"type":"function_call_output","call_id":"call_1","output":"ok"}}
+{"timestamp":"2026-02-01T00:00:05Z","type":"response_item","payload":{"type":"message","role":"developer","content":[{"type":"input_text","text":"dev msg"}]}}
+{"timestamp":"2026-02-01T00:00:06Z","type":"session_meta","payload":{"cwd":"C:/repo","id":"abc","source":"cli","cli_version":"0.1.0"}}

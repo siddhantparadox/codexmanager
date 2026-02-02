@@ -1,13 +1,10 @@
 # AGENTS.md — AI Coding Guide for Codex Manager (Tauri)
 
-This repo builds a **Codex Manager** desktop app. It manages Codex config/assets (files) and optionally runs a small allowlist of Codex CLI management commands.
+This repo builds a **Codex Manager** desktop app. It manages Codex config/assets (files), surfaces local session history, and runs an in-app Codex chat runner with optional terminal access.
 
 ## 1) Prime directive
-- **Do not build a Codex runner.**
-- **Do not add “run arbitrary command” features.**
-- The app edits/organizes files + optionally calls **whitelisted** Codex CLI management subcommands.
-
-If a requested change would turn this into an agent host, refuse and suggest an alternative within scope.
+- The app edits/organizes files, reads local session history, and runs an in-app Codex chat runner.
+- Prefer explicit user action and clear command previews for any execution.
 
 ---
 
@@ -18,6 +15,7 @@ Treat on-disk artifacts as the source of truth:
 - `REPO_ROOT/.codex/skills/**`
 - `CODEX_HOME/prompts/**`
 - `CODEX_HOME/rules/*.rules`
+- `CODEX_HOME/sessions/**` (read-only session history)
 - Optional managed/system layers (read-only unless explicitly editable)
 
 The app may maintain an internal **cache/index**, but never as canonical truth.
@@ -32,8 +30,7 @@ The app may maintain an internal **cache/index**, but never as canonical truth.
 - Keep TOML structural constraints intact (root keys before tables).
 
 ### 3.2 Subprocess execution
-- Only execute a **hardcoded allowlist** of Codex CLI commands.
-- Never execute user-entered command strings.
+- Allow Codex CLI/app-server commands and user-entered commands when explicitly enabled.
 - Always show the exact command that will run.
 - Enforce timeouts; capture stdout/stderr.
 
@@ -81,7 +78,7 @@ The app may maintain an internal **cache/index**, but never as canonical truth.
 When asked to implement something:
 
 1) **Clarify scope**
-   - Confirm it’s a “manager” feature (files + whitelisted CLI), not “run Codex.”
+   - Confirm it’s a “manager + Codex chat runner” feature (files + history + in-app runner/terminal).
 
 2) **Locate canonical files**
    - Identify the file(s)/folders affected.
@@ -101,7 +98,6 @@ When asked to implement something:
 
 7) **Security review**
    - Ensure no secrets are leaked.
-   - Ensure no arbitrary subprocess execution.
 
 8) **Docs**
    - Update `DesignDoc.md` if the feature changes flows or architecture.

@@ -1,8 +1,9 @@
 # Codex Manager (Tauri)
 
 Codex Manager is a desktop configuration and asset manager for OpenAI Codex.
-It does not run Codex sessions or execute arbitrary commands. It edits and organizes on-disk
-Codex files with a safety-first flow (diff preview, backups, atomic writes).
+It edits and organizes on-disk Codex files with a safety-first flow (diff preview, backups, atomic writes),
+surfaces local session history from CODEX_HOME, and includes an in-app Codex chat runner with optional
+terminal access for advanced workflows.
 
 ![Codex Manager dashboard](screenshots/Dashboard.jpg)
 
@@ -16,6 +17,7 @@ Codex files with a safety-first flow (diff preview, backups, atomic writes).
 - Public Skills (Clawdhub): search registry, preview SKILL.md/files, install via overlay/replace/sync.
 - Diagnostics panel for parse errors and missing paths.
 - Settings for CODEX_HOME, repo roots, Codex usage snapshot (plan + rate limit windows + auth status), and local session analytics + wrapped summary from CODEX_HOME logs.
+- Chats: searchable session history (pin/archive), transcript paging, copy full ID + resume command, and a new chat workflow that can write workspace-scoped overrides to `.codex/config.toml` on copy.
 
 ## Supported platforms
 - Windows 10/11 (x64): NSIS + MSI installers.
@@ -91,7 +93,7 @@ Includes:
 
 ### First run setup
 1) Open Settings and set CODEX_HOME (or ensure the `CODEX_HOME` env var is set).
-2) Add any repo roots that contain `.codex/skills` for repo-scoped skills.
+2) Add any repo roots that contain `.codex/skills` for repo-scoped skills (also enables workspace defaults in Chats).
 3) Return to Dashboard and click "Refresh scan" if needed.
 
 ### What the app manages
@@ -101,6 +103,8 @@ Canonical sources of truth are on disk:
 - `REPO_ROOT/.codex/skills/**`
 - `CODEX_HOME/prompts/**`
 - `CODEX_HOME/rules/*.rules`
+- `CODEX_HOME/sessions/**` (read-only history)
+- `WORKSPACE/.codex/config.toml` (workspace-scoped overrides from Chats)
 
 ### Editing flow
 All writes follow the same safety rails:
@@ -118,6 +122,7 @@ All writes follow the same safety rails:
 - Skills: view user and repo skills, edit SKILL.md, create or delete skills.
 - Public Skills (Clawdhub): browse/search the Clawdhub registry, preview SKILL.md and files, then install via overlay/replace/sync.
 - Backups: review, restore, or delete snapshots.
+- Chats: review local sessions, pin/archive, copy resume command, and start new chats with workspace defaults.
 
 ### Managing public presets
 Public presets live in `src/features/config/data/publicConfigs.ts`. Add new entries there to
@@ -136,4 +141,3 @@ User-created presets are stored in the app data directory under `user-configs/`.
 
 ## Notes
 - Raw config editors and previews show full values; handle secrets with care.
-- The app only runs a small allowlist of Codex CLI management commands (optional).

@@ -1,0 +1,4 @@
+{"timestamp":"2026-01-05T10:00:00Z","type":"turn_context","payload":{"cwd":"C:/repo","model":"gpt-5-codex"}}
+{"timestamp":"2026-01-05T10:00:05Z","type":"event_msg","payload":{"role":"user","content":"Hi"}}
+{"timestamp":"2026-01-05T10:00:06Z","type":"event_msg","payload":{"type":"token_count","info":{"total_token_usage":{"total_tokens":10}}}}
+{"timestamp":"2026-01-05T10:00:07Z","type":"event_msg","payload":{"message":{"role":"assistant","content":"Hello"}}}

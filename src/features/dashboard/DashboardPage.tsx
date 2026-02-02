@@ -1,11 +1,16 @@
-import { useMemo } from "react";
+import { useEffect, useMemo, useState } from "react";
 import type { CSSProperties } from "react";
 import { useNavigate } from "react-router-dom";
+import { chatSessionsList } from "../../lib/api";
+import { normalizeError } from "../../lib/errors";
 import { useAppState } from "../../store/appStore";
 
 export default function DashboardPage() {
   const { scan, busy, loadConfig } = useAppState();
   const navigate = useNavigate();
+  const [chatCount, setChatCount] = useState<number | null>(null);
+  const [chatLoading, setChatLoading] = useState(false);
+  const [chatError, setChatError] = useState<string | null>(null);
 
   const dashboardStats = useMemo(() => {
     if (!scan) return null;
@@ -18,6 +23,31 @@ export default function DashboardPage() {
   }, [scan]);
 
   const diagnostics = scan?.diagnostics ?? [];
+
+  useEffect(() => {
+    let active = true;
+    const loadChats = async () => {
+      setChatLoading(true);
+      setChatError(null);
+      try {
+        const result = await chatSessionsList();
+        if (!active) return;
+        setChatCount(result.sessions.length);
+      } catch (err) {
+        if (!active) return;
+        setChatCount(null);
+        setChatError(normalizeError(err));
+      } finally {
+        if (active) {
+          setChatLoading(false);
+        }
+      }
+    };
+    void loadChats();
+    return () => {
+      active = false;
+    };
+  }, [scan]);
 
   return (
     <section className="grid">
@@ -61,6 +91,20 @@ export default function DashboardPage() {
         </button>
       </div>
       <div className="card" style={cardDelay("240ms")}>
+        <h3>Chats</h3>
+        <p className="card-value">{chatCount ?? "-"}</p>
+        <p className="card-note">
+          {chatError
+            ? "Unable to load sessions"
+            : chatLoading
+              ? "Loading sessions"
+              : "Local session history"}
+        </p>
+        <button className="ghost-button" onClick={() => navigate("/chats")}>
+          Open chats
+        </button>
+      </div>
+      <div className="card" style={cardDelay("320ms")}>
         <h3>Backups</h3>
         <p className="card-value">{dashboardStats?.backups ?? "-"}</p>
         <p className="card-note">Automatic safety snapshots</p>

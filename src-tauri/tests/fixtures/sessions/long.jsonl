@@ -1,0 +1,5 @@
+{"timestamp":"2026-01-05T10:00:00Z","type":"event_msg","payload":{"role":"user","content":"m1"}}
+{"timestamp":"2026-01-05T10:00:01Z","type":"event_msg","payload":{"role":"assistant","content":"m2"}}
+{"timestamp":"2026-01-05T10:00:02Z","type":"event_msg","payload":{"role":"user","content":"m3"}}
+{"timestamp":"2026-01-05T10:00:03Z","type":"event_msg","payload":{"role":"assistant","content":"m4"}}
+{"timestamp":"2026-01-05T10:00:04Z","type":"event_msg","payload":{"role":"assistant","content":"m5"}}

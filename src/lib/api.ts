@@ -3,6 +3,11 @@ import type {
   ApplyResult,
   BackupSummary,
   ChangeRequest,
+  ChatMessagesPage,
+  ChatSessionsResponse,
+  CodexCommandPreview,
+  CodexCommandRequest,
+  CodexCommandResult,
   CodexLocalUsageSummary,
   CodexUsageSnapshot,
   ConfigText,
@@ -12,7 +17,8 @@ import type {
   SkillFileEntry,
   RemoteSkillDetail,
   RemoteSkillPage,
-  UserConfigSummary
+  UserConfigSummary,
+  WorkspaceEntry
 } from "./types";
 
 export async function getSettings(): Promise<Settings> {
@@ -29,6 +35,12 @@ export async function scanState(): Promise<ScanState> {
 
 export async function readConfigText(): Promise<ConfigText> {
   return invoke("read_config_text");
+}
+
+export async function readWorkspaceConfigText(
+  workspaceRoot: string
+): Promise<ConfigText> {
+  return invoke("read_workspace_config_text", { workspaceRoot });
 }
 
 export async function readSkillText(path: string): Promise<string> {
@@ -103,4 +115,74 @@ export async function codexGetLocalUsageSummary(
   codexHome?: string
 ): Promise<CodexLocalUsageSummary> {
   return invoke("codex_get_local_usage_summary", { codexHome: codexHome ?? null });
+}
+
+export async function chatSessionsList(): Promise<ChatSessionsResponse> {
+  return invoke("chat_sessions_list");
+}
+
+export async function chatOverlaySet(
+  sessionId: string,
+  updates: {
+    pinned?: boolean;
+    archived?: boolean;
+    lastReadTs?: number;
+    title?: string | null;
+    draft?: string | null;
+  }
+): Promise<void> {
+  return invoke("chat_overlay_set", {
+    sessionId,
+    pinned: updates.pinned ?? null,
+    archived: updates.archived ?? null,
+    lastReadTs: updates.lastReadTs ?? null,
+    title: updates.title ?? null,
+    draft: updates.draft ?? null
+  });
+}
+
+export async function chatSessionLatest(
+  sessionId: string,
+  limit?: number
+): Promise<ChatMessagesPage> {
+  return invoke("chat_session_latest", { sessionId, limit: limit ?? null });
+}
+
+export async function chatSessionPage(
+  sessionId: string,
+  cursor: number,
+  limit?: number
+): Promise<ChatMessagesPage> {
+  return invoke("chat_session_page", {
+    sessionId,
+    cursor,
+    limit: limit ?? null
+  });
+}
+
+export async function codexBuildCommand(
+  request: CodexCommandRequest
+): Promise<CodexCommandPreview> {
+  return invoke("codex_build_command", { request });
+}
+
+export async function codexRunCommand(
+  request: CodexCommandRequest,
+  timeoutMs?: number
+): Promise<CodexCommandResult> {
+  return invoke("codex_run_command", { request, timeoutMs: timeoutMs ?? null });
+}
+
+export async function workspacesList(): Promise<WorkspaceEntry[]> {
+  return invoke("workspaces_list");
+}
+
+export async function workspacesUpsert(
+  entry: WorkspaceEntry
+): Promise<WorkspaceEntry[]> {
+  return invoke("workspaces_upsert", { entry });
+}
+
+export async function workspacesRemove(id: string): Promise<WorkspaceEntry[]> {
+  return invoke("workspaces_remove", { id });
 }

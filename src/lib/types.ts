@@ -165,6 +165,89 @@ export type CodexLocalUsageSummary = {
   token_events_scanned: number;
 };
 
+export type ChatSessionSummary = {
+  id: string;
+  first_ts?: number | null;
+  last_ts?: number | null;
+  message_count: number;
+  last_model?: string | null;
+  last_cwd?: string | null;
+  title?: string | null;
+  draft?: string | null;
+  pinned: boolean;
+  archived: boolean;
+  last_read_ts?: number | null;
+  has_unread: boolean;
+};
+
+export type ChatSessionsResponse = {
+  sessions_path: string;
+  sessions_dir_exists: boolean;
+  sessions: ChatSessionSummary[];
+  files_seen: number;
+  files_parsed: number;
+  parse_errors: number;
+};
+
+export type ChatMessage = {
+  id: string;
+  role: string;
+  content: string;
+  timestamp?: number | null;
+  tool_name?: string | null;
+  tool_call_id?: string | null;
+  tool_status?: string | null;
+  kind?: string | null;
+  subtype?: string | null;
+  raw_type?: string | null;
+};
+
+export type CodexRunOptions = {
+  cwd?: string | null;
+  profile?: string | null;
+  model?: string | null;
+  sandbox?: string | null;
+  approvals?: string | null;
+  search?: boolean | null;
+  prompt?: string | null;
+};
+
+export type CodexCommandRequest = {
+  kind: "new" | "resume";
+  session_id?: string | null;
+  options: CodexRunOptions;
+};
+
+export type CodexCommandPreview = {
+  executable: string;
+  args: string[];
+  display: string;
+  cwd?: string | null;
+};
+
+export type CodexCommandResult = {
+  preview: CodexCommandPreview;
+  stdout: string;
+  stderr: string;
+  exit_code?: number | null;
+  timed_out: boolean;
+};
+
+export type WorkspaceEntry = {
+  id: string;
+  name?: string | null;
+  path: string;
+  default_profile?: string | null;
+  last_run?: CodexRunOptions | null;
+};
+
+export type ChatMessagesPage = {
+  session_id: string;
+  total_count: number;
+  next_cursor?: number | null;
+  messages: ChatMessage[];
+};
+
 export type ScanState = {
   settings: Settings;
   config: ConfigSummary;
@@ -195,6 +278,7 @@ export type ConfigText = {
   redacted: boolean;
   parsed?: JsonValue | null;
   parse_error?: string | null;
+  exists?: boolean;
 };
 
 export type JsonValue =
@@ -206,8 +290,13 @@ export type JsonValue =
   | { [key: string]: JsonValue };
 
 export type ScalarValue = {
-  kind: "string" | "integer" | "float" | "boolean";
-  value: string | number | boolean;
+  kind: "string" | "integer" | "float" | "boolean" | "string_list";
+  value: string | number | boolean | string[];
+};
+
+export type ConfigPathChange = {
+  path: string[];
+  value: ScalarValue;
 };
 
 export type SkillFolderSpec = {
@@ -227,6 +316,12 @@ export type ChangeRequest =
   | { type: "toggle_mcp_server"; name: string; enabled: boolean }
   | { type: "set_config_scalar"; key: string; value: ScalarValue }
   | { type: "set_config_path"; path: string[]; value: ScalarValue }
+  | { type: "set_config_paths"; changes: ConfigPathChange[] }
+  | {
+      type: "set_workspace_config_paths";
+      workspace_root: string;
+      changes: ConfigPathChange[];
+    }
   | { type: "replace_config"; content: string }
   | { type: "upsert_mcp_server"; name: string; table_toml: string }
   | { type: "delete_mcp_server"; name: string }

@@ -1,6 +1,7 @@
 import { HashRouter, Navigate, Route, Routes } from "react-router-dom";
 import AppShell from "./layouts/AppShell";
 import BackupsPage from "./features/backups/BackupsPage";
+import ChatsPage from "./features/chats/ChatsPage";
 import ConfigLibraryPage from "./features/config/ConfigLibraryPage";
 import ConfigPage from "./features/config/ConfigPage";
 import MyConfigsPage from "./features/config/MyConfigsPage";
@@ -18,6 +19,7 @@ export default function App() {
         <Routes>
           <Route element={<AppShell />}>
             <Route index element={<DashboardPage />} />
+            <Route path="chats" element={<ChatsPage />} />
             <Route path="config" element={<ConfigPage />} />
             <Route path="config/library" element={<ConfigLibraryPage />} />
             <Route path="config/my" element={<MyConfigsPage />} />

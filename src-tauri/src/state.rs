@@ -1,4 +1,5 @@
 use crate::errors::AppResult;
+use crate::chat_sessions::SessionIndexCache;
 use crate::models::Settings;
 use crate::paths::{default_codex_home, AppPaths};
 use crate::fs::write_atomic;
@@ -7,6 +8,7 @@ use tauri::AppHandle;
 #[derive(Debug)]
 pub struct AppState {
   pub settings: Settings,
+  pub chat_cache: SessionIndexCache,
 }
 
 impl Default for AppState {
@@ -17,6 +19,7 @@ impl Default for AppState {
         repo_roots: Vec::new(),
         cli_path: None,
       },
+      chat_cache: SessionIndexCache::default(),
     }
   }
 }

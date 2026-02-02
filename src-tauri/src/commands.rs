@@ -1,24 +1,33 @@
 use std::collections::HashSet;
 use std::fs as std_fs;
 use std::path::{Path, PathBuf};
+use std::process::{Command, Stdio};
 use std::sync::Mutex;
+use std::time::Duration;
 
 use base64::Engine;
 use rfd::FileDialog;
 use tauri::{AppHandle, State};
+use wait_timeout::ChildExt;
 
 use crate::errors::{AppError, AppResult};
 use crate::fs;
+use crate::chat_overlays::{load_overlays, save_overlays, ChatOverlay};
+use crate::chat_sessions;
+use crate::codex_commands::{build_command_preview, normalize_command_cwd};
 use crate::models::{
-  ApplyResult, ChangeRequest, ConfigText, Diagnostic, InstallMode, PreviewFile, PreviewResult,
-  RemoteSkillDetail, RemoteSkillPage, ScanState, Settings, SkillFileEntry, SkillFolderSpec,
-  SkillScope, UserConfigSummary,
+  ApplyResult, ChangeRequest, ChatMessagesPage, ChatSessionSummary, ChatSessionsResponse,
+  CodexCommandPreview, CodexCommandRequest, CodexCommandResult, ConfigText, Diagnostic, InstallMode,
+  PreviewFile, PreviewResult, RemoteSkillDetail, RemoteSkillPage, ScanState, Settings,
+  SkillFileEntry, SkillFolderSpec, SkillScope, UserConfigSummary, WorkspaceEntry,
 };
 use crate::paths::{
   config_path, is_within_root, repo_skills_root, resolve_codex_home, sanitize_config_name,
+  workspace_config_path,
   sanitize_skill_name, user_skills_root, AppPaths,
 };
 use crate::state::{load_settings, normalize_settings, save_settings, AppState};
+use crate::workspace_registry::{load_registry, remove_entry, save_registry, upsert_entry};
 use crate::skills_registry;
 use crate::toml_patch;
 use similar::TextDiff;
@@ -88,6 +97,246 @@ pub fn scan_state(app: AppHandle, state: State<Mutex<AppState>>) -> AppResult<Sc
 }
 
 #[tauri::command]
+pub fn chat_sessions_list(app: AppHandle, state: State<Mutex<AppState>>) -> AppResult<ChatSessionsResponse> {
+  let settings = ensure_settings(&app, &state)?;
+  let codex_home = resolve_codex_home(&settings)?;
+  let sessions_dir = codex_home.join("sessions");
+  let sessions_dir_exists = sessions_dir.is_dir();
+  let sessions_path = sessions_dir.to_string_lossy().to_string();
+  let paths = AppPaths::from_app(&app)?;
+  let overlay_store = load_overlays(&paths.chat_overlays_path()).unwrap_or_default();
+
+  let mut guard = state.lock().map_err(|_| AppError::new("state", "State lock failed"))?;
+  let (sessions, stats) = chat_sessions::index_sessions(&sessions_dir, Some(&mut guard.chat_cache))?;
+
+  let mut summaries: Vec<ChatSessionSummary> = sessions
+    .into_iter()
+    .map(|session| {
+      let overlay = overlay_store.items.get(&session.id);
+      let pinned = overlay.map(|o| o.pinned).unwrap_or(false);
+      let archived = overlay.map(|o| o.archived).unwrap_or(false);
+      let last_read_ts = overlay.and_then(|o| o.last_read_ts);
+      let title = overlay.and_then(|o| o.title.clone());
+      let draft = overlay.and_then(|o| o.draft.clone());
+      let has_unread = match (session.last_ts, last_read_ts) {
+        (Some(last_ts), Some(last_read_ts)) => last_ts > last_read_ts,
+        (Some(_), None) => true,
+        _ => false,
+      };
+      ChatSessionSummary {
+        id: session.id,
+        first_ts: session.first_ts,
+        last_ts: session.last_ts,
+        message_count: session.message_count,
+        last_model: session.last_model,
+        last_cwd: session.last_cwd,
+        title,
+        draft,
+        pinned,
+        archived,
+        last_read_ts,
+        has_unread,
+      }
+    })
+    .filter(|summary| has_workspace(&summary.last_cwd))
+    .collect();
+  summaries.sort_by(|a, b| b.last_ts.unwrap_or(0).cmp(&a.last_ts.unwrap_or(0)));
+
+  Ok(ChatSessionsResponse {
+    sessions_path,
+    sessions_dir_exists,
+    sessions: summaries,
+    files_seen: stats.files_seen,
+    files_parsed: stats.files_parsed,
+    parse_errors: stats.parse_errors,
+  })
+}
+
+#[tauri::command]
+pub fn chat_overlay_set(
+  app: AppHandle,
+  session_id: String,
+  pinned: Option<bool>,
+  archived: Option<bool>,
+  last_read_ts: Option<i64>,
+  title: Option<String>,
+  draft: Option<String>,
+) -> AppResult<()> {
+  let paths = AppPaths::from_app(&app)?;
+  let path = paths.chat_overlays_path();
+  let mut store = load_overlays(&path)?;
+  let entry = store
+    .items
+    .entry(session_id)
+    .or_insert_with(ChatOverlay::default);
+  if let Some(value) = pinned {
+    entry.pinned = value;
+  }
+  if let Some(value) = archived {
+    entry.archived = value;
+  }
+  if let Some(value) = last_read_ts {
+    entry.last_read_ts = Some(value);
+  }
+  if let Some(value) = title {
+    let trimmed = value.trim();
+    entry.title = if trimmed.is_empty() {
+      None
+    } else {
+      Some(value)
+    };
+  }
+  if let Some(value) = draft {
+    let trimmed = value.trim();
+    entry.draft = if trimmed.is_empty() {
+      None
+    } else {
+      Some(value)
+    };
+  }
+  if store.version == 0 {
+    store.version = 1;
+  }
+  save_overlays(&path, &store)?;
+  Ok(())
+}
+
+#[tauri::command]
+pub fn chat_session_latest(
+  app: AppHandle,
+  state: State<Mutex<AppState>>,
+  session_id: String,
+  limit: Option<usize>,
+) -> AppResult<ChatMessagesPage> {
+  let settings = ensure_settings(&app, &state)?;
+  let codex_home = resolve_codex_home(&settings)?;
+  let sessions_dir = codex_home.join("sessions");
+  let limit = limit.unwrap_or(100).clamp(1, 500);
+  let (messages, total, next_cursor) =
+    chat_sessions::session_messages_latest(&sessions_dir, &session_id, limit)?;
+
+  Ok(ChatMessagesPage {
+    session_id,
+    total_count: total,
+    next_cursor,
+    messages,
+  })
+}
+
+#[tauri::command]
+pub fn chat_session_page(
+  app: AppHandle,
+  state: State<Mutex<AppState>>,
+  session_id: String,
+  cursor: usize,
+  limit: Option<usize>,
+) -> AppResult<ChatMessagesPage> {
+  let settings = ensure_settings(&app, &state)?;
+  let codex_home = resolve_codex_home(&settings)?;
+  let sessions_dir = codex_home.join("sessions");
+  let limit = limit.unwrap_or(100).clamp(1, 500);
+  let (messages, total, next_cursor) =
+    chat_sessions::session_messages_page(&sessions_dir, &session_id, cursor, limit)?;
+
+  Ok(ChatMessagesPage {
+    session_id,
+    total_count: total,
+    next_cursor,
+    messages,
+  })
+}
+
+#[tauri::command]
+pub fn codex_build_command(
+  app: AppHandle,
+  state: State<Mutex<AppState>>,
+  request: CodexCommandRequest,
+) -> AppResult<CodexCommandPreview> {
+  let settings = ensure_settings(&app, &state)?;
+  build_command_preview(&settings, &request)
+}
+
+#[tauri::command]
+pub fn codex_run_command(
+  app: AppHandle,
+  state: State<Mutex<AppState>>,
+  request: CodexCommandRequest,
+  timeout_ms: Option<u64>,
+) -> AppResult<CodexCommandResult> {
+  let settings = ensure_settings(&app, &state)?;
+  let preview = build_command_preview(&settings, &request)?;
+  let mut command = Command::new(&preview.executable);
+  command.args(&preview.args);
+  command.stdout(Stdio::piped());
+  command.stderr(Stdio::piped());
+  if let Some(cwd) = normalize_command_cwd(preview.cwd.clone()) {
+    command.current_dir(cwd);
+  }
+
+  let mut child = command.spawn().map_err(|error| {
+    AppError::new("codex_command", format!("Failed to spawn: {}", error))
+  })?;
+
+  let timeout = Duration::from_millis(timeout_ms.unwrap_or(20_000));
+  let status = child
+    .wait_timeout(timeout)
+    .map_err(|error| AppError::new("codex_command", format!("{}", error)))?;
+
+  if status.is_none() {
+    let _ = child.kill();
+    let _ = child.wait();
+    return Ok(CodexCommandResult {
+      preview,
+      stdout: String::new(),
+      stderr: "Timed out".to_string(),
+      exit_code: None,
+      timed_out: true,
+    });
+  }
+
+  let output = child.wait_with_output().map_err(|error| {
+    AppError::new("codex_command", format!("Failed to read output: {}", error))
+  })?;
+  Ok(CodexCommandResult {
+    preview,
+    stdout: String::from_utf8_lossy(&output.stdout).to_string(),
+    stderr: String::from_utf8_lossy(&output.stderr).to_string(),
+    exit_code: output.status.code(),
+    timed_out: false,
+  })
+}
+
+#[tauri::command]
+pub fn workspaces_list(app: AppHandle) -> AppResult<Vec<WorkspaceEntry>> {
+  let paths = AppPaths::from_app(&app)?;
+  let registry = load_registry(&paths.workspaces_path())?;
+  Ok(registry.items)
+}
+
+#[tauri::command]
+pub fn workspaces_upsert(app: AppHandle, entry: WorkspaceEntry) -> AppResult<Vec<WorkspaceEntry>> {
+  let paths = AppPaths::from_app(&app)?;
+  let path = paths.workspaces_path();
+  let mut registry = load_registry(&path)?;
+  upsert_entry(&mut registry, entry);
+  if registry.version == 0 {
+    registry.version = 1;
+  }
+  save_registry(&path, &registry)?;
+  Ok(registry.items)
+}
+
+#[tauri::command]
+pub fn workspaces_remove(app: AppHandle, id: String) -> AppResult<Vec<WorkspaceEntry>> {
+  let paths = AppPaths::from_app(&app)?;
+  let path = paths.workspaces_path();
+  let mut registry = load_registry(&path)?;
+  remove_entry(&mut registry, &id);
+  save_registry(&path, &registry)?;
+  Ok(registry.items)
+}
+
+#[tauri::command]
 pub fn read_config_text(app: AppHandle, state: State<Mutex<AppState>>) -> AppResult<ConfigText> {
   let settings = ensure_settings(&app, &state)?;
   let codex_home = resolve_codex_home(&settings)?;
@@ -102,6 +351,36 @@ pub fn read_config_text(app: AppHandle, state: State<Mutex<AppState>>) -> AppRes
     redacted: false,
     parsed,
     parse_error,
+    exists: true,
+  })
+}
+
+#[tauri::command]
+pub fn read_workspace_config_text(
+  app: AppHandle,
+  state: State<Mutex<AppState>>,
+  workspace_root: String,
+) -> AppResult<ConfigText> {
+  let settings = ensure_settings(&app, &state)?;
+  let root = resolve_workspace_root(&settings, &workspace_root)?;
+  let path = workspace_config_path(&root);
+  if !path.exists() {
+    return Ok(ConfigText {
+      text: String::new(),
+      redacted: false,
+      parsed: None,
+      parse_error: None,
+      exists: false,
+    });
+  }
+  let text = fs::read_text_file(&path)?;
+  let (parsed, parse_error) = parse_toml_json(&text);
+  Ok(ConfigText {
+    text,
+    redacted: false,
+    parsed,
+    parse_error,
+    exists: true,
   })
 }
 
@@ -210,6 +489,7 @@ pub fn read_user_config_text(app: AppHandle, name: String) -> AppResult<ConfigTe
     redacted: false,
     parsed,
     parse_error,
+    exists: true,
   })
 }
 
@@ -259,13 +539,24 @@ pub fn apply_change(
   }
 
   if plan.validate_config {
-    let config_path = config_path(&resolve_codex_home(&settings)?);
-    let text = fs::read_text_file(&config_path)?;
-    let parse_result: Result<toml::Value, _> = text.parse();
-    if let Err(error) = parse_result {
-      let _ = fs::restore_backup(&paths.backups_dir(), &backup.id);
-      cleanup_created_dirs(&plan.create_dirs);
-      return Err(AppError::new("toml_parse", error.to_string()));
+    for file in &plan.files {
+      if file.binary {
+        continue;
+      }
+      match file.path.extension().and_then(|value| value.to_str()) {
+        Some("toml") => {}
+        _ => continue,
+      }
+      let text = fs::read_text_file(&file.path)?;
+      let parse_result: Result<toml::Value, _> = text.parse();
+      if let Err(error) = parse_result {
+        let _ = fs::restore_backup(&paths.backups_dir(), &backup.id);
+        cleanup_created_dirs(&plan.create_dirs);
+        return Err(AppError::new(
+          "toml_parse",
+          format!("{}: {}", file.path.display(), error),
+        ));
+      }
     }
   }
 
@@ -359,6 +650,55 @@ fn build_change_plan(
         true,
         false,
       ))
+    }
+    ChangeRequest::SetConfigPaths { changes } => {
+      ensure_config_exists(&config_path)?;
+      let before = fs::read_text_file(&config_path)?;
+      let after = toml_patch::set_values_at_paths(&before, &changes)?;
+      Ok(single_file_plan(
+        "set_config_paths",
+        config_path,
+        before,
+        after,
+        true,
+        false,
+      ))
+    }
+    ChangeRequest::SetWorkspaceConfigPaths {
+      workspace_root,
+      changes,
+    } => {
+      let root = resolve_workspace_root(settings, &workspace_root)?;
+      let path = workspace_config_path(&root);
+      let exists = path.exists();
+      let before = if exists {
+        fs::read_text_file(&path)?
+      } else {
+        String::new()
+      };
+      let after = toml_patch::set_values_at_paths(&before, &changes)?;
+      let mut create_dirs = Vec::new();
+      if !exists {
+        if let Some(parent) = path.parent() {
+          create_dirs.push(parent.to_path_buf());
+        }
+      }
+      Ok(ChangePlan {
+        operation: "set_workspace_config_paths".to_string(),
+        files: vec![FileChange {
+          path,
+          before: Some(before),
+          after: Some(after),
+          after_bytes: None,
+          redact: false,
+          binary: false,
+        }],
+        warnings: Vec::new(),
+        validate_config: true,
+        create_dirs,
+        remove_dirs_before: Vec::new(),
+        remove_dirs: Vec::new(),
+      })
     }
     ChangeRequest::ReplaceConfig { content } => {
       let before = if config_path.exists() {
@@ -1093,6 +1433,14 @@ mod tests {
       change.path == extra_path && change.after.is_none()
     }));
   }
+
+  #[test]
+  fn workspace_filter_rejects_empty_values() {
+    assert!(!has_workspace(&None));
+    assert!(!has_workspace(&Some(String::new())));
+    assert!(!has_workspace(&Some("   ".to_string())));
+    assert!(has_workspace(&Some("C:/repo".to_string())));
+  }
 }
 
 fn build_plan_diff(plan: &ChangePlan) -> AppResult<String> {
@@ -1228,6 +1576,48 @@ fn ensure_settings(app: &AppHandle, state: &State<Mutex<AppState>>) -> AppResult
   let mut guard = state.lock().map_err(|_| AppError::new("state", "State lock failed"))?;
   guard.settings = settings.clone();
   Ok(settings)
+}
+
+fn resolve_workspace_root(settings: &Settings, workspace_root: &str) -> AppResult<PathBuf> {
+  let trimmed = workspace_root.trim();
+  if trimmed.is_empty() {
+    return Err(AppError::new(
+      "workspace_root",
+      "Workspace root is required",
+    ));
+  }
+  let path = PathBuf::from(trimmed);
+  if !path.exists() {
+    return Err(AppError::new(
+      "workspace_root",
+      "Workspace root not found",
+    ));
+  }
+  if !path.is_dir() {
+    return Err(AppError::new(
+      "workspace_root",
+      "Workspace root must be a directory",
+    ));
+  }
+  if !settings.repo_roots.is_empty()
+    && !settings
+      .repo_roots
+      .iter()
+      .any(|root| is_within_root(Path::new(root), &path))
+  {
+    return Err(AppError::new(
+      "workspace_root",
+      "Workspace root not registered",
+    ));
+  }
+  Ok(path)
+}
+
+fn has_workspace(value: &Option<String>) -> bool {
+  value
+    .as_deref()
+    .map(|value| !value.trim().is_empty())
+    .unwrap_or(false)
 }
 
 fn single_file_plan(
