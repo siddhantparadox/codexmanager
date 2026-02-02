@@ -55,6 +55,12 @@ pub struct ChatMessage {
   pub tool_call_id: Option<String>,
   #[serde(skip_serializing_if = "Option::is_none")]
   pub tool_status: Option<String>,
+  #[serde(skip_serializing_if = "Option::is_none")]
+  pub kind: Option<String>,
+  #[serde(skip_serializing_if = "Option::is_none")]
+  pub subtype: Option<String>,
+  #[serde(skip_serializing_if = "Option::is_none")]
+  pub raw_type: Option<String>,
 }
 
 #[derive(Debug, Serialize)]
@@ -63,6 +69,56 @@ pub struct ChatMessagesPage {
   pub total_count: usize,
   pub next_cursor: Option<usize>,
   pub messages: Vec<ChatMessage>,
+}
+
+#[derive(Debug, Serialize, Deserialize, Clone, Default)]
+pub struct CodexRunOptions {
+  pub cwd: Option<String>,
+  pub profile: Option<String>,
+  pub model: Option<String>,
+  pub sandbox: Option<String>,
+  pub approvals: Option<String>,
+  pub search: Option<bool>,
+  pub prompt: Option<String>,
+}
+
+#[derive(Debug, Serialize, Deserialize, Clone)]
+pub struct CodexCommandRequest {
+  pub kind: String,
+  pub session_id: Option<String>,
+  pub options: CodexRunOptions,
+}
+
+#[derive(Debug, Serialize, Deserialize, Clone)]
+pub struct CodexCommandPreview {
+  pub executable: String,
+  pub args: Vec<String>,
+  pub display: String,
+  pub cwd: Option<String>,
+}
+
+#[derive(Debug, Serialize, Deserialize, Clone)]
+pub struct CodexCommandResult {
+  pub preview: CodexCommandPreview,
+  pub stdout: String,
+  pub stderr: String,
+  pub exit_code: Option<i32>,
+  pub timed_out: bool,
+}
+
+#[derive(Debug, Serialize, Deserialize, Clone)]
+pub struct WorkspaceEntry {
+  pub id: String,
+  pub name: Option<String>,
+  pub path: String,
+  pub default_profile: Option<String>,
+  pub last_run: Option<CodexRunOptions>,
+}
+
+#[derive(Debug, Serialize, Deserialize, Default)]
+pub struct WorkspaceRegistry {
+  pub version: u32,
+  pub items: Vec<WorkspaceEntry>,
 }
 
 #[derive(Debug, Serialize)]

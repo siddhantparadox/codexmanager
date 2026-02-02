@@ -35,6 +35,10 @@ impl AppPaths {
   pub fn chat_overlays_path(&self) -> PathBuf {
     self.app_data_dir.join("chat-overlays.json")
   }
+
+  pub fn workspaces_path(&self) -> PathBuf {
+    self.app_data_dir.join("workspaces.json")
+  }
 }
 
 pub fn default_codex_home() -> AppResult<PathBuf> {

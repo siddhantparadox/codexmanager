@@ -9,9 +9,9 @@ use time::OffsetDateTime;
 fn parses_session_summary() {
   let fixtures = Path::new("tests/fixtures/sessions");
   let (sessions, stats) = index_sessions(fixtures, None).expect("index sessions");
-  assert_eq!(stats.files_seen, 3);
-  assert_eq!(stats.files_parsed, 3);
-  assert_eq!(sessions.len(), 3);
+  assert_eq!(stats.files_seen, 4);
+  assert_eq!(stats.files_parsed, 4);
+  assert_eq!(sessions.len(), 4);
 
   let summary = sessions
     .iter()
@@ -121,16 +121,96 @@ fn loads_latest_messages_and_pages_older() {
   let fixtures = Path::new("tests/fixtures/sessions");
   let (latest, total, cursor) =
     session_messages_latest(fixtures, "basic", 1).expect("latest messages");
-  assert_eq!(total, 2);
+  assert_eq!(total, 4);
   assert_eq!(latest.len(), 1);
   assert_eq!(latest[0].role, "assistant");
   assert!(cursor.is_some());
 
   let (older, _total, next_cursor) =
     session_messages_page(fixtures, "basic", cursor.unwrap(), 10).expect("older messages");
-  assert_eq!(older.len(), 1);
-  assert_eq!(older[0].role, "user");
+  assert_eq!(older.len(), 3);
+  assert_eq!(older[0].role, "meta");
+  assert_eq!(older[1].role, "user");
   assert!(next_cursor.is_none());
+}
+
+#[test]
+fn classifies_mixed_messages() {
+  let fixtures = Path::new("tests/fixtures/sessions");
+  let (latest, _total, _cursor) =
+    session_messages_latest(fixtures, "mixed", 20).expect("latest messages");
+  assert_eq!(latest.len(), 7);
+
+  let reasoning = latest
+    .iter()
+    .find(|message| message.subtype.as_deref() == Some("agent_reasoning"))
+    .expect("reasoning message");
+  assert_eq!(reasoning.kind.as_deref(), Some("reasoning"));
+
+  let tool_call = latest
+    .iter()
+    .find(|message| message.subtype.as_deref() == Some("function_call"))
+    .expect("tool call");
+  assert_eq!(tool_call.kind.as_deref(), Some("tool"));
+  assert_eq!(tool_call.tool_name.as_deref(), Some("exec_command"));
+  assert_eq!(tool_call.tool_call_id.as_deref(), Some("call_1"));
+
+  let tool_output = latest
+    .iter()
+    .find(|message| message.subtype.as_deref() == Some("function_call_output"))
+    .expect("tool output");
+  assert_eq!(tool_output.kind.as_deref(), Some("tool"));
+  assert_eq!(tool_output.tool_call_id.as_deref(), Some("call_1"));
+
+  let developer = latest
+    .iter()
+    .find(|message| message.role == "developer")
+    .expect("developer message");
+  assert_eq!(developer.kind.as_deref(), Some("developer"));
+
+  let meta = latest
+    .iter()
+    .find(|message| message.subtype.as_deref() == Some("session_meta"))
+    .expect("session meta");
+  assert_eq!(meta.kind.as_deref(), Some("meta"));
+}
+
+#[test]
+fn session_meta_sets_workspace_when_turn_context_missing() {
+  let temp = tempfile::tempdir().expect("tempdir");
+  let path = temp.path().join("session.jsonl");
+  std::fs::write(
+    &path,
+    r#"{"timestamp":"2026-02-02T01:43:48Z","type":"session_meta","payload":{"cwd":"C:/repo"}}
+{"timestamp":"2026-02-02T01:43:49Z","type":"event_msg","payload":{"role":"user","content":"hi"}}"#,
+  )
+  .expect("write");
+
+  let (sessions, _stats) = index_sessions(temp.path(), None).expect("index sessions");
+  assert_eq!(sessions.len(), 1);
+  assert_eq!(sessions[0].last_cwd.as_deref(), Some("C:/repo"));
+}
+
+#[test]
+fn system_messages_are_filtered_from_transcript_and_counts() {
+  let temp = tempfile::tempdir().expect("tempdir");
+  let path = temp.path().join("session.jsonl");
+  std::fs::write(
+    &path,
+    r#"{"timestamp":"2026-02-02T01:43:48Z","type":"event_msg","payload":{"role":"system","content":"sys"}}
+{"timestamp":"2026-02-02T01:43:49Z","type":"event_msg","payload":{"role":"user","content":"hi"}}"#,
+  )
+  .expect("write");
+
+  let (latest, total, _cursor) =
+    session_messages_latest(temp.path(), "session", 10).expect("latest messages");
+  assert_eq!(total, 1);
+  assert_eq!(latest.len(), 1);
+  assert_eq!(latest[0].role, "user");
+
+  let (sessions, _stats) = index_sessions(temp.path(), None).expect("index sessions");
+  assert_eq!(sessions.len(), 1);
+  assert_eq!(sessions[0].message_count, 1);
 }
 
 #[test]

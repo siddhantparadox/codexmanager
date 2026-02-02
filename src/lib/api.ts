@@ -5,6 +5,9 @@ import type {
   ChangeRequest,
   ChatMessagesPage,
   ChatSessionsResponse,
+  CodexCommandPreview,
+  CodexCommandRequest,
+  CodexCommandResult,
   CodexLocalUsageSummary,
   CodexUsageSnapshot,
   ConfigText,
@@ -14,7 +17,8 @@ import type {
   SkillFileEntry,
   RemoteSkillDetail,
   RemoteSkillPage,
-  UserConfigSummary
+  UserConfigSummary,
+  WorkspaceEntry
 } from "./types";
 
 export async function getSettings(): Promise<Settings> {
@@ -148,4 +152,31 @@ export async function chatSessionPage(
     cursor,
     limit: limit ?? null
   });
+}
+
+export async function codexBuildCommand(
+  request: CodexCommandRequest
+): Promise<CodexCommandPreview> {
+  return invoke("codex_build_command", { request });
+}
+
+export async function codexRunCommand(
+  request: CodexCommandRequest,
+  timeoutMs?: number
+): Promise<CodexCommandResult> {
+  return invoke("codex_run_command", { request, timeoutMs: timeoutMs ?? null });
+}
+
+export async function workspacesList(): Promise<WorkspaceEntry[]> {
+  return invoke("workspaces_list");
+}
+
+export async function workspacesUpsert(
+  entry: WorkspaceEntry
+): Promise<WorkspaceEntry[]> {
+  return invoke("workspaces_upsert", { entry });
+}
+
+export async function workspacesRemove(id: string): Promise<WorkspaceEntry[]> {
+  return invoke("workspaces_remove", { id });
 }

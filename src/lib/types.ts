@@ -197,6 +197,48 @@ export type ChatMessage = {
   tool_name?: string | null;
   tool_call_id?: string | null;
   tool_status?: string | null;
+  kind?: string | null;
+  subtype?: string | null;
+  raw_type?: string | null;
+};
+
+export type CodexRunOptions = {
+  cwd?: string | null;
+  profile?: string | null;
+  model?: string | null;
+  sandbox?: string | null;
+  approvals?: string | null;
+  search?: boolean | null;
+  prompt?: string | null;
+};
+
+export type CodexCommandRequest = {
+  kind: "new" | "resume";
+  session_id?: string | null;
+  options: CodexRunOptions;
+};
+
+export type CodexCommandPreview = {
+  executable: string;
+  args: string[];
+  display: string;
+  cwd?: string | null;
+};
+
+export type CodexCommandResult = {
+  preview: CodexCommandPreview;
+  stdout: string;
+  stderr: string;
+  exit_code?: number | null;
+  timed_out: boolean;
+};
+
+export type WorkspaceEntry = {
+  id: string;
+  name?: string | null;
+  path: string;
+  default_profile?: string | null;
+  last_run?: CodexRunOptions | null;
 };
 
 export type ChatMessagesPage = {

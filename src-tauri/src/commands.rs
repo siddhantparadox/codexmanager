@@ -1,26 +1,32 @@
 use std::collections::HashSet;
 use std::fs as std_fs;
 use std::path::{Path, PathBuf};
+use std::process::{Command, Stdio};
 use std::sync::Mutex;
+use std::time::Duration;
 
 use base64::Engine;
 use rfd::FileDialog;
 use tauri::{AppHandle, State};
+use wait_timeout::ChildExt;
 
 use crate::errors::{AppError, AppResult};
 use crate::fs;
 use crate::chat_overlays::{load_overlays, save_overlays, ChatOverlay};
 use crate::chat_sessions;
+use crate::codex_commands::{build_command_preview, normalize_command_cwd};
 use crate::models::{
-  ApplyResult, ChangeRequest, ChatMessagesPage, ChatSessionSummary, ChatSessionsResponse, ConfigText,
-  Diagnostic, InstallMode, PreviewFile, PreviewResult, RemoteSkillDetail, RemoteSkillPage,
-  ScanState, Settings, SkillFileEntry, SkillFolderSpec, SkillScope, UserConfigSummary,
+  ApplyResult, ChangeRequest, ChatMessagesPage, ChatSessionSummary, ChatSessionsResponse,
+  CodexCommandPreview, CodexCommandRequest, CodexCommandResult, ConfigText, Diagnostic, InstallMode,
+  PreviewFile, PreviewResult, RemoteSkillDetail, RemoteSkillPage, ScanState, Settings,
+  SkillFileEntry, SkillFolderSpec, SkillScope, UserConfigSummary, WorkspaceEntry,
 };
 use crate::paths::{
   config_path, is_within_root, repo_skills_root, resolve_codex_home, sanitize_config_name,
   sanitize_skill_name, user_skills_root, AppPaths,
 };
 use crate::state::{load_settings, normalize_settings, save_settings, AppState};
+use crate::workspace_registry::{load_registry, remove_entry, save_registry, upsert_entry};
 use crate::skills_registry;
 use crate::toml_patch;
 use similar::TextDiff;
@@ -102,7 +108,7 @@ pub fn chat_sessions_list(app: AppHandle, state: State<Mutex<AppState>>) -> AppR
   let mut guard = state.lock().map_err(|_| AppError::new("state", "State lock failed"))?;
   let (sessions, stats) = chat_sessions::index_sessions(&sessions_dir, Some(&mut guard.chat_cache))?;
 
-  let summaries = sessions
+  let mut summaries: Vec<ChatSessionSummary> = sessions
     .into_iter()
     .map(|session| {
       let overlay = overlay_store.items.get(&session.id);
@@ -131,7 +137,9 @@ pub fn chat_sessions_list(app: AppHandle, state: State<Mutex<AppState>>) -> AppR
         has_unread,
       }
     })
+    .filter(|summary| has_workspace(&summary.last_cwd))
     .collect();
+  summaries.sort_by(|a, b| b.last_ts.unwrap_or(0).cmp(&a.last_ts.unwrap_or(0)));
 
   Ok(ChatSessionsResponse {
     sessions_path,
@@ -235,6 +243,96 @@ pub fn chat_session_page(
     next_cursor,
     messages,
   })
+}
+
+#[tauri::command]
+pub fn codex_build_command(
+  app: AppHandle,
+  state: State<Mutex<AppState>>,
+  request: CodexCommandRequest,
+) -> AppResult<CodexCommandPreview> {
+  let settings = ensure_settings(&app, &state)?;
+  build_command_preview(&settings, &request)
+}
+
+#[tauri::command]
+pub fn codex_run_command(
+  app: AppHandle,
+  state: State<Mutex<AppState>>,
+  request: CodexCommandRequest,
+  timeout_ms: Option<u64>,
+) -> AppResult<CodexCommandResult> {
+  let settings = ensure_settings(&app, &state)?;
+  let preview = build_command_preview(&settings, &request)?;
+  let mut command = Command::new(&preview.executable);
+  command.args(&preview.args);
+  command.stdout(Stdio::piped());
+  command.stderr(Stdio::piped());
+  if let Some(cwd) = normalize_command_cwd(preview.cwd.clone()) {
+    command.current_dir(cwd);
+  }
+
+  let mut child = command.spawn().map_err(|error| {
+    AppError::new("codex_command", format!("Failed to spawn: {}", error))
+  })?;
+
+  let timeout = Duration::from_millis(timeout_ms.unwrap_or(20_000));
+  let status = child
+    .wait_timeout(timeout)
+    .map_err(|error| AppError::new("codex_command", format!("{}", error)))?;
+
+  if status.is_none() {
+    let _ = child.kill();
+    let _ = child.wait();
+    return Ok(CodexCommandResult {
+      preview,
+      stdout: String::new(),
+      stderr: "Timed out".to_string(),
+      exit_code: None,
+      timed_out: true,
+    });
+  }
+
+  let output = child.wait_with_output().map_err(|error| {
+    AppError::new("codex_command", format!("Failed to read output: {}", error))
+  })?;
+  Ok(CodexCommandResult {
+    preview,
+    stdout: String::from_utf8_lossy(&output.stdout).to_string(),
+    stderr: String::from_utf8_lossy(&output.stderr).to_string(),
+    exit_code: output.status.code(),
+    timed_out: false,
+  })
+}
+
+#[tauri::command]
+pub fn workspaces_list(app: AppHandle) -> AppResult<Vec<WorkspaceEntry>> {
+  let paths = AppPaths::from_app(&app)?;
+  let registry = load_registry(&paths.workspaces_path())?;
+  Ok(registry.items)
+}
+
+#[tauri::command]
+pub fn workspaces_upsert(app: AppHandle, entry: WorkspaceEntry) -> AppResult<Vec<WorkspaceEntry>> {
+  let paths = AppPaths::from_app(&app)?;
+  let path = paths.workspaces_path();
+  let mut registry = load_registry(&path)?;
+  upsert_entry(&mut registry, entry);
+  if registry.version == 0 {
+    registry.version = 1;
+  }
+  save_registry(&path, &registry)?;
+  Ok(registry.items)
+}
+
+#[tauri::command]
+pub fn workspaces_remove(app: AppHandle, id: String) -> AppResult<Vec<WorkspaceEntry>> {
+  let paths = AppPaths::from_app(&app)?;
+  let path = paths.workspaces_path();
+  let mut registry = load_registry(&path)?;
+  remove_entry(&mut registry, &id);
+  save_registry(&path, &registry)?;
+  Ok(registry.items)
 }
 
 #[tauri::command]
@@ -1243,6 +1341,14 @@ mod tests {
       change.path == extra_path && change.after.is_none()
     }));
   }
+
+  #[test]
+  fn workspace_filter_rejects_empty_values() {
+    assert!(!has_workspace(&None));
+    assert!(!has_workspace(&Some(String::new())));
+    assert!(!has_workspace(&Some("   ".to_string())));
+    assert!(has_workspace(&Some("C:/repo".to_string())));
+  }
 }
 
 fn build_plan_diff(plan: &ChangePlan) -> AppResult<String> {
@@ -1378,6 +1484,13 @@ fn ensure_settings(app: &AppHandle, state: &State<Mutex<AppState>>) -> AppResult
   let mut guard = state.lock().map_err(|_| AppError::new("state", "State lock failed"))?;
   guard.settings = settings.clone();
   Ok(settings)
+}
+
+fn has_workspace(value: &Option<String>) -> bool {
+  value
+    .as_deref()
+    .map(|value| !value.trim().is_empty())
+    .unwrap_or(false)
 }
 
 fn single_file_plan(
