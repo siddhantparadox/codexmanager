@@ -37,6 +37,12 @@ export async function readConfigText(): Promise<ConfigText> {
   return invoke("read_config_text");
 }
 
+export async function readWorkspaceConfigText(
+  workspaceRoot: string
+): Promise<ConfigText> {
+  return invoke("read_workspace_config_text", { workspaceRoot });
+}
+
 export async function readSkillText(path: string): Promise<string> {
   return invoke("read_skill_text", { path });
 }

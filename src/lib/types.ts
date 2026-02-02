@@ -278,6 +278,7 @@ export type ConfigText = {
   redacted: boolean;
   parsed?: JsonValue | null;
   parse_error?: string | null;
+  exists?: boolean;
 };
 
 export type JsonValue =
@@ -289,8 +290,13 @@ export type JsonValue =
   | { [key: string]: JsonValue };
 
 export type ScalarValue = {
-  kind: "string" | "integer" | "float" | "boolean";
-  value: string | number | boolean;
+  kind: "string" | "integer" | "float" | "boolean" | "string_list";
+  value: string | number | boolean | string[];
+};
+
+export type ConfigPathChange = {
+  path: string[];
+  value: ScalarValue;
 };
 
 export type SkillFolderSpec = {
@@ -310,6 +316,12 @@ export type ChangeRequest =
   | { type: "toggle_mcp_server"; name: string; enabled: boolean }
   | { type: "set_config_scalar"; key: string; value: ScalarValue }
   | { type: "set_config_path"; path: string[]; value: ScalarValue }
+  | { type: "set_config_paths"; changes: ConfigPathChange[] }
+  | {
+      type: "set_workspace_config_paths";
+      workspace_root: string;
+      changes: ConfigPathChange[];
+    }
   | { type: "replace_config"; content: string }
   | { type: "upsert_mcp_server"; name: string; table_toml: string }
   | { type: "delete_mcp_server"; name: string }

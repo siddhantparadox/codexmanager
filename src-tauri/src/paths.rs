@@ -62,6 +62,10 @@ pub fn config_path(codex_home: &Path) -> PathBuf {
   codex_home.join("config.toml")
 }
 
+pub fn workspace_config_path(workspace_root: &Path) -> PathBuf {
+  workspace_root.join(".codex").join("config.toml")
+}
+
 pub fn user_skills_root(codex_home: &Path) -> PathBuf {
   codex_home.join("skills")
 }

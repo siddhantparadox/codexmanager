@@ -244,6 +244,7 @@ pub struct ConfigText {
   pub redacted: bool,
   pub parsed: Option<JsonValue>,
   pub parse_error: Option<String>,
+  pub exists: bool,
 }
 
 #[derive(Debug, Serialize, Deserialize, Clone)]
@@ -284,6 +285,8 @@ pub enum ChangeRequest {
   ToggleMcpServer { name: String, enabled: bool },
   SetConfigScalar { key: String, value: ScalarValue },
   SetConfigPath { path: Vec<String>, value: ScalarValue },
+  SetConfigPaths { changes: Vec<ConfigPathChange> },
+  SetWorkspaceConfigPaths { workspace_root: String, changes: Vec<ConfigPathChange> },
   ReplaceConfig { content: String },
   UpsertMcpServer { name: String, table_toml: String },
   DeleteMcpServer { name: String },
@@ -310,6 +313,12 @@ pub enum ChangeRequest {
 }
 
 #[derive(Debug, Serialize, Deserialize, Clone)]
+pub struct ConfigPathChange {
+  pub path: Vec<String>,
+  pub value: ScalarValue,
+}
+
+#[derive(Debug, Serialize, Deserialize, Clone)]
 #[serde(rename_all = "snake_case")]
 pub enum InstallMode {
   Overlay,
@@ -324,13 +333,14 @@ pub enum SkillScope {
   Repo,
 }
 
-#[derive(Debug, Serialize, Deserialize)]
+#[derive(Debug, Serialize, Deserialize, Clone)]
 #[serde(tag = "kind", content = "value", rename_all = "snake_case")]
 pub enum ScalarValue {
   String(String),
   Integer(i64),
   Float(f64),
   Boolean(bool),
+  StringList(Vec<String>),
 }
 
 #[derive(Debug, Serialize, Deserialize)]

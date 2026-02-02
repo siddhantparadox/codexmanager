@@ -17,7 +17,7 @@ terminal access for advanced workflows.
 - Public Skills (Clawdhub): search registry, preview SKILL.md/files, install via overlay/replace/sync.
 - Diagnostics panel for parse errors and missing paths.
 - Settings for CODEX_HOME, repo roots, Codex usage snapshot (plan + rate limit windows + auth status), and local session analytics + wrapped summary from CODEX_HOME logs.
-- Chats: local session history with transcript view, resume/copy actions, and in-app chat runner.
+- Chats: local session history with transcript view, resume/copy actions, and an in-app chat runner that writes workspace-scoped overrides to `.codex/config.toml` on copy/run.
 
 ## Supported platforms
 - Windows 10/11 (x64): NSIS + MSI installers.

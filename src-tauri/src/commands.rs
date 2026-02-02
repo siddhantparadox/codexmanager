@@ -23,6 +23,7 @@ use crate::models::{
 };
 use crate::paths::{
   config_path, is_within_root, repo_skills_root, resolve_codex_home, sanitize_config_name,
+  workspace_config_path,
   sanitize_skill_name, user_skills_root, AppPaths,
 };
 use crate::state::{load_settings, normalize_settings, save_settings, AppState};
@@ -350,6 +351,36 @@ pub fn read_config_text(app: AppHandle, state: State<Mutex<AppState>>) -> AppRes
     redacted: false,
     parsed,
     parse_error,
+    exists: true,
+  })
+}
+
+#[tauri::command]
+pub fn read_workspace_config_text(
+  app: AppHandle,
+  state: State<Mutex<AppState>>,
+  workspace_root: String,
+) -> AppResult<ConfigText> {
+  let settings = ensure_settings(&app, &state)?;
+  let root = resolve_workspace_root(&settings, &workspace_root)?;
+  let path = workspace_config_path(&root);
+  if !path.exists() {
+    return Ok(ConfigText {
+      text: String::new(),
+      redacted: false,
+      parsed: None,
+      parse_error: None,
+      exists: false,
+    });
+  }
+  let text = fs::read_text_file(&path)?;
+  let (parsed, parse_error) = parse_toml_json(&text);
+  Ok(ConfigText {
+    text,
+    redacted: false,
+    parsed,
+    parse_error,
+    exists: true,
   })
 }
 
@@ -458,6 +489,7 @@ pub fn read_user_config_text(app: AppHandle, name: String) -> AppResult<ConfigTe
     redacted: false,
     parsed,
     parse_error,
+    exists: true,
   })
 }
 
@@ -607,6 +639,55 @@ fn build_change_plan(
         true,
         false,
       ))
+    }
+    ChangeRequest::SetConfigPaths { changes } => {
+      ensure_config_exists(&config_path)?;
+      let before = fs::read_text_file(&config_path)?;
+      let after = toml_patch::set_values_at_paths(&before, &changes)?;
+      Ok(single_file_plan(
+        "set_config_paths",
+        config_path,
+        before,
+        after,
+        true,
+        false,
+      ))
+    }
+    ChangeRequest::SetWorkspaceConfigPaths {
+      workspace_root,
+      changes,
+    } => {
+      let root = resolve_workspace_root(settings, &workspace_root)?;
+      let path = workspace_config_path(&root);
+      let exists = path.exists();
+      let before = if exists {
+        fs::read_text_file(&path)?
+      } else {
+        String::new()
+      };
+      let after = toml_patch::set_values_at_paths(&before, &changes)?;
+      let mut create_dirs = Vec::new();
+      if !exists {
+        if let Some(parent) = path.parent() {
+          create_dirs.push(parent.to_path_buf());
+        }
+      }
+      Ok(ChangePlan {
+        operation: "set_workspace_config_paths".to_string(),
+        files: vec![FileChange {
+          path,
+          before: Some(before),
+          after: Some(after),
+          after_bytes: None,
+          redact: false,
+          binary: false,
+        }],
+        warnings: Vec::new(),
+        validate_config: true,
+        create_dirs,
+        remove_dirs_before: Vec::new(),
+        remove_dirs: Vec::new(),
+      })
     }
     ChangeRequest::ReplaceConfig { content } => {
       let before = if config_path.exists() {
@@ -1484,6 +1565,41 @@ fn ensure_settings(app: &AppHandle, state: &State<Mutex<AppState>>) -> AppResult
   let mut guard = state.lock().map_err(|_| AppError::new("state", "State lock failed"))?;
   guard.settings = settings.clone();
   Ok(settings)
+}
+
+fn resolve_workspace_root(settings: &Settings, workspace_root: &str) -> AppResult<PathBuf> {
+  let trimmed = workspace_root.trim();
+  if trimmed.is_empty() {
+    return Err(AppError::new(
+      "workspace_root",
+      "Workspace root is required",
+    ));
+  }
+  let path = PathBuf::from(trimmed);
+  if !path.exists() {
+    return Err(AppError::new(
+      "workspace_root",
+      "Workspace root not found",
+    ));
+  }
+  if !path.is_dir() {
+    return Err(AppError::new(
+      "workspace_root",
+      "Workspace root must be a directory",
+    ));
+  }
+  if !settings.repo_roots.is_empty()
+    && !settings
+      .repo_roots
+      .iter()
+      .any(|root| is_within_root(Path::new(root), &path))
+  {
+    return Err(AppError::new(
+      "workspace_root",
+      "Workspace root not registered",
+    ));
+  }
+  Ok(path)
 }
 
 fn has_workspace(value: &Option<String>) -> bool {

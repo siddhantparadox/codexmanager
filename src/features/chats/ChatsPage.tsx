@@ -6,6 +6,7 @@ import {
   chatSessionsList,
   codexBuildCommand,
   codexRunCommand,
+  readWorkspaceConfigText,
   workspacesList,
   workspacesUpsert
 } from "../../lib/api";
@@ -13,14 +14,24 @@ import { normalizeError } from "../../lib/errors";
 import type {
   CodexCommandPreview,
   CodexCommandRequest,
-  CodexCommandResult,
   CodexRunOptions,
   ChatMessage,
   ChatMessagesPage,
   ChatSessionSummary,
   ChatSessionsResponse,
+  ConfigText,
+  ConfigPathChange,
+  JsonValue,
   WorkspaceEntry
 } from "../../lib/types";
+import { useAppState } from "../../store/appStore";
+import {
+  APPROVAL_POLICIES,
+  CODEX_MODELS,
+  REASONING_EFFORTS,
+  SANDBOX_MODES,
+  WEB_SEARCH_MODES
+} from "../../lib/codexConfigBasics";
 import ChatMarkdown from "../../components/ChatMarkdown";
 import ThinkingBlock from "../../components/ThinkingBlock";
 import ToolCallCard from "../../components/ToolCallCard";
@@ -87,6 +98,67 @@ function formatRoleLabel(role: string) {
   return role.charAt(0).toUpperCase() + role.slice(1);
 }
 
+type ConfigDefaultsBaseline = {
+  model?: string;
+  approval_policy?: string;
+  sandbox_mode?: string;
+  web_search?: string;
+  model_reasoning_effort?: string;
+};
+
+type WorkspaceOverrideField = {
+  value: string;
+  touched: boolean;
+};
+
+type WorkspaceOverridesDraft = {
+  model: WorkspaceOverrideField;
+  approval_policy: WorkspaceOverrideField;
+  sandbox_mode: WorkspaceOverrideField;
+  web_search: WorkspaceOverrideField;
+  model_reasoning_effort: WorkspaceOverrideField;
+};
+
+type OverrideKey = keyof WorkspaceOverridesDraft;
+
+type PendingAction = "copy" | "run" | null;
+type WorkspaceConfigIssue =
+  | "not_registered"
+  | "not_found"
+  | "not_directory"
+  | "required"
+  | "unknown";
+
+async function copyToClipboard(text: string) {
+  if (navigator?.clipboard?.writeText) {
+    try {
+      await navigator.clipboard.writeText(text);
+      return;
+    } catch {
+      // Fall back to execCommand.
+    }
+  }
+  const textarea = document.createElement("textarea");
+  textarea.value = text;
+  textarea.setAttribute("readonly", "true");
+  textarea.style.position = "absolute";
+  textarea.style.left = "-9999px";
+  document.body.appendChild(textarea);
+  const selection = document.getSelection();
+  const active = document.activeElement as HTMLElement | null;
+  textarea.select();
+  textarea.setSelectionRange(0, textarea.value.length);
+  const ok = document.execCommand("copy");
+  textarea.remove();
+  if (active) {
+    active.focus();
+  }
+  selection?.removeAllRanges();
+  if (!ok) {
+    throw new Error("Copy failed.");
+  }
+}
+
 function normalizeKind(message: ChatMessage) {
   return (message.kind ?? message.role ?? "meta").toLowerCase();
 }
@@ -95,7 +167,89 @@ function isBubbleKind(kind: string) {
   return kind === "user" || kind === "assistant";
 }
 
+function getPathValue(value: JsonValue | null | undefined, path: string[]): JsonValue | undefined {
+  if (!value || path.length === 0) {
+    return value ?? undefined;
+  }
+  let current: JsonValue | undefined = value ?? undefined;
+  for (const key of path) {
+    if (!current || typeof current !== "object" || Array.isArray(current)) {
+      return undefined;
+    }
+    current = (current as Record<string, JsonValue>)[key];
+  }
+  return current;
+}
+
+function getStringValue(value: JsonValue | undefined): string | undefined {
+  return typeof value === "string" ? value : undefined;
+}
+
+function parseAppError(error: unknown): { code?: string; message?: string } {
+  if (!error) return {};
+  if (typeof error === "string") {
+    const trimmed = error.trim();
+    if (trimmed.startsWith("{")) {
+      try {
+        const parsed = JSON.parse(trimmed) as { code?: string; message?: string };
+        if (parsed && (parsed.code || parsed.message)) {
+          return parsed;
+        }
+      } catch {
+        return { message: error };
+      }
+    }
+    return { message: error };
+  }
+  if (error instanceof Error) {
+    return { message: error.message };
+  }
+  if (typeof error === "object") {
+    const record = error as Record<string, unknown>;
+    const code = typeof record.code === "string" ? record.code : undefined;
+    const message = typeof record.message === "string" ? record.message : undefined;
+    if (code || message) return { code, message };
+  }
+  return { message: normalizeError(error) };
+}
+
+function buildConfigBaseline(parsed: JsonValue | null | undefined): ConfigDefaultsBaseline {
+  return {
+    model: getStringValue(getPathValue(parsed, ["model"])),
+    approval_policy: getStringValue(getPathValue(parsed, ["approval_policy"])),
+    sandbox_mode: getStringValue(getPathValue(parsed, ["sandbox_mode"])),
+    web_search: getStringValue(getPathValue(parsed, ["web_search"])),
+    model_reasoning_effort: getStringValue(
+      getPathValue(parsed, ["model_reasoning_effort"])
+    )
+  };
+}
+
+function mergeBaselines(
+  globalBaseline: ConfigDefaultsBaseline,
+  workspaceBaseline: ConfigDefaultsBaseline
+): ConfigDefaultsBaseline {
+  return {
+    model: workspaceBaseline.model ?? globalBaseline.model,
+    approval_policy: workspaceBaseline.approval_policy ?? globalBaseline.approval_policy,
+    sandbox_mode: workspaceBaseline.sandbox_mode ?? globalBaseline.sandbox_mode,
+    web_search: workspaceBaseline.web_search ?? globalBaseline.web_search,
+    model_reasoning_effort:
+      workspaceBaseline.model_reasoning_effort ?? globalBaseline.model_reasoning_effort
+  };
+}
+
 export default function ChatsPage() {
+  const {
+    scan,
+    configText,
+    loadConfig,
+    openPreview,
+    lastAppliedAt,
+    preview,
+    settingsDraft,
+    saveSettings
+  } = useAppState();
   const [state, setState] = useState<LoadState>(EMPTY_STATE);
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [query, setQuery] = useState("");
@@ -108,6 +262,17 @@ export default function ChatsPage() {
   const [loadingOlder, setLoadingOlder] = useState(false);
   const [showJump, setShowJump] = useState(false);
   const [showMeta, setShowMeta] = useState(false);
+  const [workspaceConfigText, setWorkspaceConfigText] = useState<ConfigText | null>(
+    null
+  );
+  const [workspaceConfigExists, setWorkspaceConfigExists] = useState(false);
+  const [workspaceConfigError, setWorkspaceConfigError] = useState<string | null>(
+    null
+  );
+  const [workspaceConfigIssue, setWorkspaceConfigIssue] =
+    useState<WorkspaceConfigIssue | null>(null);
+  const [registerBusy, setRegisterBusy] = useState(false);
+  const [registerError, setRegisterError] = useState<string | null>(null);
   const [overlayBusy, setOverlayBusy] = useState(false);
   const [copyNotice, setCopyNotice] = useState<string | null>(null);
   const [resumeNotice, setResumeNotice] = useState<string | null>(null);
@@ -117,20 +282,43 @@ export default function ChatsPage() {
   const [newChatOpen, setNewChatOpen] = useState(false);
   const [workspaceChoice, setWorkspaceChoice] = useState("custom");
   const [workspacePath, setWorkspacePath] = useState("");
-  const [workspaceName, setWorkspaceName] = useState("");
   const [workspaceProfile, setWorkspaceProfile] = useState("");
-  const [formModel, setFormModel] = useState("");
-  const [formSandbox, setFormSandbox] = useState("workspace-write");
-  const [formApprovals, setFormApprovals] = useState("on-request");
-  const [formSearch, setFormSearch] = useState(false);
   const [formPrompt, setFormPrompt] = useState("");
+  const [overridesDraft, setOverridesDraft] = useState<WorkspaceOverridesDraft>({
+    model: { value: "", touched: false },
+    approval_policy: { value: "", touched: false },
+    sandbox_mode: { value: "", touched: false },
+    web_search: { value: "", touched: false },
+    model_reasoning_effort: { value: "", touched: false }
+  });
+  const overridesInitialRef = useRef<Record<OverrideKey, string>>({
+    model: "",
+    approval_policy: "",
+    sandbox_mode: "",
+    web_search: "",
+    model_reasoning_effort: ""
+  });
+  const [pendingAction, setPendingAction] = useState<PendingAction>(null);
+  const [pendingActionAt, setPendingActionAt] = useState(0);
   const [commandPreview, setCommandPreview] = useState<CodexCommandPreview | null>(null);
   const [commandError, setCommandError] = useState<string | null>(null);
   const [commandBusy, setCommandBusy] = useState(false);
-  const [commandResult, setCommandResult] = useState<CodexCommandResult | null>(null);
+  const [commandCopyNotice, setCommandCopyNotice] = useState<string | null>(null);
   const scrollRef = useRef<HTMLDivElement | null>(null);
   const autoLoadRef = useRef(false);
   const stickToBottomRef = useRef(true);
+  const globalBaseline = useMemo(
+    () => buildConfigBaseline(configText?.parsed),
+    [configText?.parsed]
+  );
+  const workspaceBaseline = useMemo(
+    () => buildConfigBaseline(workspaceConfigText?.parsed),
+    [workspaceConfigText?.parsed]
+  );
+  const configBaseline = useMemo(
+    () => mergeBaselines(globalBaseline, workspaceBaseline),
+    [globalBaseline, workspaceBaseline]
+  );
 
   const loadSessions = useCallback(async () => {
     setState((prev) => ({ ...prev, loading: true, error: null }));
@@ -151,6 +339,52 @@ export default function ChatsPage() {
     }
   }, []);
 
+  const loadWorkspaceConfig = useCallback(async (workspaceRoot: string) => {
+    const trimmed = workspaceRoot.trim();
+    if (!trimmed) {
+      setWorkspaceConfigText(null);
+      setWorkspaceConfigExists(false);
+      setWorkspaceConfigError(null);
+      setWorkspaceConfigIssue(null);
+      return;
+    }
+    try {
+      const text = await readWorkspaceConfigText(trimmed);
+      setWorkspaceConfigText(text);
+      setWorkspaceConfigExists(text.exists ?? true);
+      setWorkspaceConfigError(null);
+      setWorkspaceConfigIssue(null);
+    } catch (err) {
+      const parsed = parseAppError(err);
+      const message = parsed.message ?? normalizeError(err);
+      const lowered = message.toLowerCase();
+      let issue: WorkspaceConfigIssue | null = null;
+      let friendlyMessage = message;
+      if (parsed.code === "workspace_root") {
+        if (lowered.includes("not registered")) {
+          issue = "not_registered";
+          friendlyMessage =
+            "Workspace isn't registered. Add this folder in Settings → Repo roots to save defaults. Until then, overrides apply only to this command.";
+        } else if (lowered.includes("not found")) {
+          issue = "not_found";
+          friendlyMessage = "Workspace folder not found.";
+        } else if (lowered.includes("directory")) {
+          issue = "not_directory";
+          friendlyMessage = "Workspace path must be a folder.";
+        } else if (lowered.includes("required")) {
+          issue = "required";
+          friendlyMessage = "Workspace path is required.";
+        } else {
+          issue = "unknown";
+        }
+      }
+      setWorkspaceConfigText(null);
+      setWorkspaceConfigExists(false);
+      setWorkspaceConfigIssue(issue);
+      setWorkspaceConfigError(friendlyMessage);
+    }
+  }, []);
+
   useEffect(() => {
     void loadSessions();
   }, [loadSessions]);
@@ -158,6 +392,48 @@ export default function ChatsPage() {
   useEffect(() => {
     void loadWorkspaces();
   }, [loadWorkspaces]);
+
+  useEffect(() => {
+    if (!newChatOpen) return;
+    if (!scan?.config.exists) return;
+    if (!configText) {
+      void loadConfig({ silent: true, showNotice: false });
+    }
+  }, [configText, loadConfig, newChatOpen, scan?.config.exists]);
+
+  useEffect(() => {
+    if (!newChatOpen) return;
+    void loadWorkspaceConfig(workspacePath);
+  }, [lastAppliedAt, loadWorkspaceConfig, newChatOpen, workspacePath]);
+
+  useEffect(() => {
+    if (workspaceConfigIssue !== "not_registered") {
+      setRegisterError(null);
+    }
+  }, [workspaceConfigIssue]);
+
+  useEffect(() => {
+    if (!newChatOpen) return;
+    const next = {
+      model: configBaseline.model ?? "",
+      approval_policy: configBaseline.approval_policy ?? "",
+      sandbox_mode: configBaseline.sandbox_mode ?? "",
+      web_search: configBaseline.web_search ?? "",
+      model_reasoning_effort: configBaseline.model_reasoning_effort ?? ""
+    };
+    overridesInitialRef.current = next;
+    setOverridesDraft({
+      model: { value: next.model, touched: false },
+      approval_policy: { value: next.approval_policy, touched: false },
+      sandbox_mode: { value: next.sandbox_mode, touched: false },
+      web_search: { value: next.web_search, touched: false },
+      model_reasoning_effort: { value: next.model_reasoning_effort, touched: false }
+    });
+    setCommandCopyNotice(null);
+    setCommandError(null);
+    setRegisterError(null);
+    setRegisterBusy(false);
+  }, [configBaseline, newChatOpen]);
 
   useEffect(() => {
     const handleFocus = () => {
@@ -168,7 +444,11 @@ export default function ChatsPage() {
   }, [loadSessions]);
 
   const sessions = useMemo(() => {
-    const list = state.data?.sessions ? [...state.data.sessions] : [];
+    const list = state.data?.sessions
+      ? state.data.sessions.filter(
+          (session) => (session.last_cwd ?? "").trim().length > 0
+        )
+      : [];
     list.sort((a, b) => (b.last_ts ?? 0) - (a.last_ts ?? 0));
     const search = query.trim().toLowerCase();
     let filtered = list;
@@ -194,11 +474,42 @@ export default function ChatsPage() {
   }, [selectedId, sessions]);
 
   const visibleMessages = useMemo(() => {
-    if (showMeta) {
-      return messages;
+    const filtered = showMeta
+      ? messages
+      : messages.filter((message) => normalizeKind(message) !== "meta");
+    const deduped: ChatMessage[] = [];
+    for (const message of filtered) {
+      const kind = normalizeKind(message);
+      if (isBubbleKind(kind)) {
+        const previous = deduped[deduped.length - 1];
+        if (previous && isBubbleKind(normalizeKind(previous))) {
+          const sameRole = previous.role === message.role;
+          const sameContent = previous.content === message.content;
+          const prevTs = previous.timestamp ?? null;
+          const nextTs = message.timestamp ?? null;
+          const sameTime =
+            prevTs !== null && nextTs !== null
+              ? Math.abs(prevTs - nextTs) <= 1
+              : prevTs === null && nextTs === null;
+          if (sameRole && sameContent && sameTime) {
+            continue;
+          }
+        }
+      }
+      deduped.push(message);
     }
-    return messages.filter((message) => normalizeKind(message) !== "meta");
+    return deduped;
   }, [messages, showMeta]);
+
+  const globalConfigPath = scan?.config.path ?? "CODEX_HOME/config.toml";
+  const workspaceConfigPath = useMemo(() => {
+    const trimmed = workspacePath.trim().replace(/[\\/]+$/, "");
+    if (!trimmed) {
+      return ".codex/config.toml";
+    }
+    const separator = trimmed.includes("\\") ? "\\.codex\\config.toml" : "/.codex/config.toml";
+    return `${trimmed}${separator}`;
+  }, [workspacePath]);
 
   const sessionsPath = state.data?.sessions_path ?? "CODEX_HOME/sessions";
 
@@ -235,10 +546,12 @@ export default function ChatsPage() {
   const copySessionId = useCallback(() => {
     if (!selected) return;
     const id = formatSessionLabel(selected.id);
-    void navigator.clipboard.writeText(id).then(() => {
-      setCopyNotice("Copied");
-      window.setTimeout(() => setCopyNotice(null), 1500);
-    });
+    void copyToClipboard(id)
+      .then(() => {
+        setCopyNotice("Copied");
+        window.setTimeout(() => setCopyNotice(null), 1500);
+      })
+      .catch((err) => setCopyNotice(normalizeError(err)));
   }, [selected]);
 
   const copyResumeCommand = useCallback(async () => {
@@ -247,7 +560,7 @@ export default function ChatsPage() {
     setResumeNotice(null);
     try {
       const preview = await codexBuildCommand(buildResumeRequest(selected));
-      await navigator.clipboard.writeText(preview.display);
+      await copyToClipboard(preview.display);
       setResumeNotice("Resume command copied.");
       window.setTimeout(() => setResumeNotice(null), 2000);
     } catch (err) {
@@ -279,6 +592,8 @@ export default function ChatsPage() {
 
   const loadOlderMessages = useCallback(async () => {
     if (!selectedId || messagesCursor === null || loadingOlder) return;
+    stickToBottomRef.current = false;
+    setShowJump(true);
     const container = scrollRef.current;
     const prevHeight = container?.scrollHeight ?? 0;
     setLoadingOlder(true);
@@ -318,34 +633,189 @@ export default function ChatsPage() {
       }
       setWorkspaceChoice(entry.id);
       setWorkspacePath(entry.path);
-      setWorkspaceName(entry.name ?? "");
       setWorkspaceProfile(entry.default_profile ?? entry.last_run?.profile ?? "");
-      setFormModel(entry.last_run?.model ?? "");
-      setFormSandbox(entry.last_run?.sandbox ?? "workspace-write");
-      setFormApprovals(entry.last_run?.approvals ?? "on-request");
-      setFormSearch(entry.last_run?.search ?? false);
     },
     [workspaces]
   );
+
+  const registerWorkspaceRoot = useCallback(async () => {
+    const trimmed = workspacePath.trim();
+    if (!trimmed) return;
+    const settings = settingsDraft ?? scan?.settings;
+    if (!settings) {
+      setRegisterError("Unable to load settings.");
+      return;
+    }
+    setRegisterError(null);
+    const currentRoots = settings.repo_roots ?? [];
+    const nextRoots = Array.from(new Set([...currentRoots, trimmed]));
+    if (nextRoots.length === currentRoots.length) {
+      await loadWorkspaceConfig(trimmed);
+      return;
+    }
+    setRegisterBusy(true);
+    const ok = await saveSettings({ ...settings, repo_roots: nextRoots });
+    setRegisterBusy(false);
+    if (!ok) {
+      setRegisterError("Unable to update repo roots.");
+      return;
+    }
+    await loadWorkspaceConfig(trimmed);
+  }, [loadWorkspaceConfig, saveSettings, scan?.settings, settingsDraft, workspacePath]);
+
+  const updateOverride = useCallback((key: OverrideKey, value: string) => {
+    const initial = overridesInitialRef.current[key] ?? "";
+    setOverridesDraft((prev) => ({
+      ...prev,
+      [key]: { value, touched: value.trim() !== initial.trim() }
+    }));
+  }, []);
+
+  const resetOverrideIfEmpty = useCallback((key: OverrideKey) => {
+    setOverridesDraft((prev) => {
+      if (prev[key].value.trim()) {
+        return prev;
+      }
+      const initial = overridesInitialRef.current[key] ?? "";
+      return { ...prev, [key]: { value: initial, touched: false } };
+    });
+  }, []);
+
+  const buildOverridesChanges = useCallback((): ConfigPathChange[] => {
+    const changes: ConfigPathChange[] = [];
+    const pushString = (path: string[], field: WorkspaceOverrideField) => {
+      if (!field.touched) return;
+      const trimmed = field.value.trim();
+      if (!trimmed) return;
+      changes.push({
+        path,
+        value: { kind: "string", value: trimmed }
+      });
+    };
+
+    pushString(["model"], overridesDraft.model);
+    pushString(["approval_policy"], overridesDraft.approval_policy);
+    pushString(["sandbox_mode"], overridesDraft.sandbox_mode);
+    pushString(["web_search"], overridesDraft.web_search);
+    pushString(["model_reasoning_effort"], overridesDraft.model_reasoning_effort);
+
+    return changes;
+  }, [overridesDraft]);
+
+  const overridesSummary = useMemo(() => {
+    const changes = buildOverridesChanges();
+    if (!changes.length) return null;
+    const labelFor = (key: string, value: string) => {
+      switch (key) {
+        case "approval_policy":
+          return APPROVAL_POLICIES.find((policy) => policy.value === value)?.label;
+        case "sandbox_mode":
+          return SANDBOX_MODES.find((mode) => mode.value === value)?.label;
+        case "web_search":
+          return WEB_SEARCH_MODES.find((mode) => mode.value === value)?.label;
+        case "model_reasoning_effort":
+          return REASONING_EFFORTS.find((effort) => effort.value === value)?.label;
+        default:
+          return null;
+      }
+    };
+    const labelForKey = (key: string) => {
+      switch (key) {
+        case "model":
+          return "Model";
+        case "approval_policy":
+          return "Approvals";
+        case "sandbox_mode":
+          return "Sandbox";
+        case "web_search":
+          return "Web search";
+        case "model_reasoning_effort":
+          return "Reasoning";
+        default:
+          return key;
+      }
+    };
+    const parts = changes.map((change) => {
+      const key = change.path[0] ?? "";
+      const rawValue = String(change.value.value ?? "");
+      const labelValue = labelFor(key, rawValue) ?? rawValue;
+      return `${labelForKey(key)} ${labelValue}`;
+    });
+    return parts.join(" · ");
+  }, [buildOverridesChanges]);
+
+  const modelOptions = useMemo(() => {
+    const options: string[] = [];
+    const seen = new Set<string>();
+    const push = (value?: string | null) => {
+      const trimmed = value?.trim();
+      if (!trimmed || seen.has(trimmed)) return;
+      seen.add(trimmed);
+      options.push(trimmed);
+    };
+    (state.data?.sessions ?? [])
+      .map((session) => session.last_model)
+      .forEach((model) => push(model));
+    CODEX_MODELS.forEach((model) => push(model));
+    push(configBaseline.model);
+    push(overridesDraft.model.value);
+    return options;
+  }, [configBaseline.model, overridesDraft.model.value, state.data?.sessions]);
+
+  const supportsXHigh = useMemo(() => {
+    const modelValue = overridesDraft.model.value.trim() || configBaseline.model || "";
+    return modelValue.toLowerCase().startsWith("gpt-5.2");
+  }, [configBaseline.model, overridesDraft.model.value]);
+
+  const reasoningOptions = useMemo(
+    () =>
+      REASONING_EFFORTS.filter((effort) => supportsXHigh || effort.value !== "xhigh"),
+    [supportsXHigh]
+  );
+
+  useEffect(() => {
+    if (supportsXHigh) return;
+    if (overridesDraft.model_reasoning_effort.value !== "xhigh") return;
+    updateOverride("model_reasoning_effort", "high");
+  }, [
+    overridesDraft.model_reasoning_effort.value,
+    supportsXHigh,
+    updateOverride
+  ]);
 
   const buildNewChatRequest = useCallback((): CodexCommandRequest => {
     const options: CodexRunOptions = {
       cwd: workspacePath || null,
       profile: workspaceProfile || null,
-      model: formModel || null,
-      sandbox: formSandbox || null,
-      approvals: formApprovals || null,
-      search: formSearch,
       prompt: formPrompt || null
     };
+    if (overridesDraft.model.touched) {
+      options.model = overridesDraft.model.value.trim() || null;
+    }
+    if (overridesDraft.sandbox_mode.touched) {
+      options.sandbox = overridesDraft.sandbox_mode.value.trim() || null;
+    }
+    if (overridesDraft.approval_policy.touched) {
+      options.approvals = overridesDraft.approval_policy.value.trim() || null;
+    }
+    if (overridesDraft.web_search.touched) {
+      options.search = overridesDraft.web_search.value.trim() === "live";
+    }
     return { kind: "new", options };
-  }, [formApprovals, formModel, formPrompt, formSandbox, formSearch, workspacePath, workspaceProfile]);
+  }, [
+    formPrompt,
+    overridesDraft.approval_policy,
+    overridesDraft.model,
+    overridesDraft.sandbox_mode,
+    overridesDraft.web_search,
+    workspacePath,
+    workspaceProfile
+  ]);
 
   useEffect(() => {
     if (!newChatOpen) return;
     if (!workspacePath.trim()) {
       setCommandPreview(null);
-      setCommandError("Workspace path is required.");
       return;
     }
     setCommandBusy(true);
@@ -357,48 +827,57 @@ export default function ChatsPage() {
   }, [buildNewChatRequest, newChatOpen, workspacePath]);
 
   const persistWorkspace = useCallback(async () => {
-    if (!workspacePath.trim()) return;
+    const trimmed = workspacePath.trim();
+    if (!trimmed) return;
+    const existing = workspaces.find((item) => item.id === trimmed);
     const entry: WorkspaceEntry = {
-      id: workspacePath.trim(),
-      name: workspaceName.trim() ? workspaceName.trim() : null,
-      path: workspacePath.trim(),
+      id: trimmed,
+      path: trimmed,
+      name: existing?.name ?? null,
       default_profile: workspaceProfile.trim() ? workspaceProfile.trim() : null,
       last_run: {
-        cwd: workspacePath.trim(),
+        cwd: trimmed,
         profile: workspaceProfile.trim() ? workspaceProfile.trim() : null,
-        model: formModel.trim() ? formModel.trim() : null,
-        sandbox: formSandbox,
-        approvals: formApprovals,
-        search: formSearch,
+        model: overridesDraft.model.value.trim()
+          ? overridesDraft.model.value.trim()
+          : null,
+        sandbox: overridesDraft.sandbox_mode.value.trim()
+          ? overridesDraft.sandbox_mode.value.trim()
+          : null,
+        approvals: overridesDraft.approval_policy.value.trim()
+          ? overridesDraft.approval_policy.value.trim()
+          : null,
+        search: overridesDraft.web_search.value.trim() === "live",
         prompt: null
       }
     };
     const updated = await workspacesUpsert(entry);
     setWorkspaces(updated);
-  }, [
-    formApprovals,
-    formModel,
-    formSandbox,
-    formSearch,
-    workspaceName,
-    workspacePath,
-    workspaceProfile
-  ]);
+  }, [overridesDraft, workspacePath, workspaceProfile, workspaces]);
 
-  const copyNewChatCommand = useCallback(async () => {
-    const preview = await codexBuildCommand(buildNewChatRequest());
-    await navigator.clipboard.writeText(preview.display);
-    await persistWorkspace();
-    setCommandPreview(preview);
-  }, [buildNewChatRequest, persistWorkspace]);
-
-  const runNewChatCommand = useCallback(async () => {
+  const performCopyCommand = useCallback(async () => {
     setCommandError(null);
-    setCommandResult(null);
+    setCommandCopyNotice(null);
     setCommandBusy(true);
     try {
-      const result = await codexRunCommand(buildNewChatRequest(), 20_000);
-      setCommandResult(result);
+      const preview = await codexBuildCommand(buildNewChatRequest());
+      await copyToClipboard(preview.display);
+      await persistWorkspace();
+      setCommandPreview(preview);
+      setCommandCopyNotice("Copied");
+      window.setTimeout(() => setCommandCopyNotice(null), 1500);
+    } catch (err) {
+      setCommandError(normalizeError(err));
+    } finally {
+      setCommandBusy(false);
+    }
+  }, [buildNewChatRequest, persistWorkspace]);
+
+  const performRunCommand = useCallback(async () => {
+    setCommandError(null);
+    setCommandBusy(true);
+    try {
+      await codexRunCommand(buildNewChatRequest(), 20_000);
       await persistWorkspace();
     } catch (err) {
       setCommandError(normalizeError(err));
@@ -406,6 +885,74 @@ export default function ChatsPage() {
       setCommandBusy(false);
     }
   }, [buildNewChatRequest, persistWorkspace]);
+
+  const requestCommandAction = useCallback(
+    async (action: Exclude<PendingAction, null>) => {
+      const trimmed = workspacePath.trim();
+      setCommandError(null);
+      if (!trimmed) {
+        setCommandError("Workspace path is required.");
+        return;
+      }
+      const changes = buildOverridesChanges();
+      const canSaveOverrides =
+        changes.length > 0 &&
+        !workspaceConfigIssue &&
+        !workspaceConfigText?.parse_error;
+      if (!changes.length || !canSaveOverrides) {
+        if (action === "copy") {
+          await performCopyCommand();
+        } else {
+          await performRunCommand();
+        }
+        return;
+      }
+      setPendingAction(action);
+      setPendingActionAt(lastAppliedAt);
+      const ok = await openPreview({
+        type: "set_workspace_config_paths",
+        workspace_root: trimmed,
+        changes
+      });
+      if (!ok) {
+        setPendingAction(null);
+        setCommandError("Unable to preview workspace overrides.");
+      }
+    },
+    [
+      buildOverridesChanges,
+      lastAppliedAt,
+      openPreview,
+      performCopyCommand,
+      performRunCommand,
+      workspaceConfigIssue,
+      workspaceConfigText?.parse_error,
+      workspacePath
+    ]
+  );
+
+  useEffect(() => {
+    if (!pendingAction) return;
+    if (preview) return;
+    if (lastAppliedAt === pendingActionAt) {
+      setPendingAction(null);
+      return;
+    }
+    const action = pendingAction;
+    setPendingAction(null);
+    if (action === "copy") {
+      void performCopyCommand();
+    } else if (action === "run") {
+      void performRunCommand();
+    }
+  }, [
+    lastAppliedAt,
+    pendingAction,
+    pendingActionAt,
+    performCopyCommand,
+    performRunCommand,
+    preview
+  ]);
 
   useEffect(() => {
     if (!selectedId) {
@@ -441,8 +988,9 @@ export default function ChatsPage() {
     const el = scrollRef.current;
     if (!el) return;
     const onScroll = () => {
+      const nearTop = el.scrollTop < 140;
       if (messagesCursor !== null && !loadingOlder) {
-        if (el.scrollTop < 140 && !autoLoadRef.current) {
+        if (nearTop && !autoLoadRef.current) {
           autoLoadRef.current = true;
           void loadOlderMessages().finally(() => {
             autoLoadRef.current = false;
@@ -450,8 +998,13 @@ export default function ChatsPage() {
         }
       }
       const nearBottom = el.scrollHeight - el.scrollTop - el.clientHeight < 80;
-      stickToBottomRef.current = nearBottom;
-      setShowJump(!nearBottom);
+      if (nearTop && messagesCursor !== null) {
+        stickToBottomRef.current = false;
+        setShowJump(true);
+      } else {
+        stickToBottomRef.current = nearBottom;
+        setShowJump(!nearBottom);
+      }
     };
     el.addEventListener("scroll", onScroll);
     return () => el.removeEventListener("scroll", onScroll);
@@ -779,151 +1332,260 @@ export default function ChatsPage() {
         </div>
       </section>
       {newChatOpen ? (
-        <div className="modal">
-          <div className="modal-card">
-            <div className="modal-header">
-              <h2>New chat</h2>
+        <div className="modal new-chat-modal">
+          <div className="modal-card new-chat-card">
+            <div className="modal-header new-chat-header">
+              <div>
+                <h2>New chat</h2>
+                <p className="modal-subtitle">
+                  Start a workspace-scoped Codex session with clean defaults.
+                </p>
+              </div>
               <button className="ghost-button" onClick={() => setNewChatOpen(false)}>
                 Close
               </button>
             </div>
             {commandError ? <div className="banner error">{commandError}</div> : null}
-            <div className="form-grid compact">
-              <label>
-                Workspace
-                <select
-                  value={workspaceChoice}
-                  onChange={(event) => applyWorkspaceSelection(event.target.value)}
-                >
-                  <option value="custom">Custom workspace</option>
-                  {workspaces.map((entry) => (
-                    <option key={entry.id} value={entry.id}>
-                      {entry.name ? `${entry.name} · ${entry.path}` : entry.path}
-                    </option>
-                  ))}
-                </select>
-              </label>
-              <label>
-                Workspace name
-                <input
-                  type="text"
-                  value={workspaceName}
-                  onChange={(event) => setWorkspaceName(event.target.value)}
-                  placeholder="Optional"
-                />
-              </label>
-              <label className="span-2">
-                Workspace path
-                <input
-                  type="text"
-                  value={workspacePath}
-                  onChange={(event) => {
-                    setWorkspaceChoice("custom");
-                    setWorkspacePath(event.target.value);
-                  }}
-                  placeholder="C:\\projects\\repo"
-                />
-              </label>
-              <label>
-                Profile
-                <input
-                  type="text"
-                  value={workspaceProfile}
-                  onChange={(event) => setWorkspaceProfile(event.target.value)}
-                  placeholder="Optional profile"
-                />
-              </label>
-              <label>
-                Model
-                <input
-                  type="text"
-                  value={formModel}
-                  onChange={(event) => setFormModel(event.target.value)}
-                  placeholder="gpt-5-codex"
-                />
-              </label>
-              <label>
-                Sandbox
-                <select
-                  value={formSandbox}
-                  onChange={(event) => setFormSandbox(event.target.value)}
-                >
-                  <option value="read-only">Read-only</option>
-                  <option value="workspace-write">Workspace write</option>
-                  <option value="danger-full-access">Full access</option>
-                </select>
-              </label>
-              <label>
-                Approvals
-                <select
-                  value={formApprovals}
-                  onChange={(event) => setFormApprovals(event.target.value)}
-                >
-                  <option value="untrusted">Untrusted</option>
-                  <option value="on-failure">On failure</option>
-                  <option value="on-request">On request</option>
-                  <option value="never">Never</option>
-                </select>
-              </label>
-              <label className="checkbox-field">
-                <input
-                  type="checkbox"
-                  checked={formSearch}
-                  onChange={(event) => setFormSearch(event.target.checked)}
-                />
-                Enable search
-              </label>
-              <label className="span-2">
-                Prompt
-                <textarea
-                  value={formPrompt}
-                  onChange={(event) => setFormPrompt(event.target.value)}
-                  placeholder="Optional prompt to start the chat"
-                />
-              </label>
-            </div>
-            <div className="command-preview">
-              {commandBusy
-                ? "Building command..."
-                : commandPreview?.display ?? "Enter a workspace path to preview the command."}
-            </div>
-            {commandResult ? (
-              <div className="command-output">
-                <div className="command-output-row">
-                  <span>Status</span>
-                  <span>
-                    {commandResult.timed_out
-                      ? "Timed out"
-                      : commandResult.exit_code === 0
-                        ? "Exited 0"
-                        : `Exited ${commandResult.exit_code ?? "?"}`}
-                  </span>
+            <div className="new-chat-section">
+              <div className="new-chat-section-header">
+                <div>
+                  <h3>Workspace</h3>
+                  <p className="panel-note">Pick where Codex should run.</p>
                 </div>
-                {commandResult.stdout ? (
-                  <pre>{commandResult.stdout}</pre>
-                ) : null}
-                {commandResult.stderr ? (
-                  <pre className="error">{commandResult.stderr}</pre>
+              </div>
+              <div className="form-grid compact">
+                <label>
+                  Workspace
+                  <select
+                    value={workspaceChoice}
+                    onChange={(event) => applyWorkspaceSelection(event.target.value)}
+                  >
+                    <option value="custom">Custom workspace</option>
+                    {workspaces.map((entry) => (
+                      <option key={entry.id} value={entry.id}>
+                        {entry.name ? `${entry.name} · ${entry.path}` : entry.path}
+                      </option>
+                    ))}
+                  </select>
+                </label>
+                <label>
+                  Profile
+                  <input
+                    type="text"
+                    value={workspaceProfile}
+                    onChange={(event) => setWorkspaceProfile(event.target.value)}
+                    placeholder="Optional profile"
+                  />
+                </label>
+                <label className="span-2">
+                  Workspace path
+                  <input
+                    type="text"
+                    value={workspacePath}
+                    onChange={(event) => {
+                      setWorkspaceChoice("custom");
+                      setWorkspacePath(event.target.value);
+                    }}
+                    placeholder="C:\\projects\\repo"
+                  />
+                </label>
+                <label className="span-2">
+                  Prompt
+                  <textarea
+                    value={formPrompt}
+                    onChange={(event) => setFormPrompt(event.target.value)}
+                    placeholder="Optional prompt to start the chat"
+                  />
+                </label>
+              </div>
+            </div>
+            <div className="new-chat-section">
+              <div className="new-chat-section-header">
+                <div>
+                  <h3>Workspace defaults</h3>
+                  <p className="panel-note">
+                    Changes write to {workspaceConfigPath}. Global defaults from{" "}
+                    {globalConfigPath} stay unchanged.
+                  </p>
+                  <p className="panel-note">
+                    Overrides are saved when you copy the command or open the CLI.
+                  </p>
+                </div>
+              </div>
+              {workspaceConfigError ? (
+                workspaceConfigIssue === "not_registered" ? (
+                  <div className="new-chat-warning">
+                    <p className="card-warning">{workspaceConfigError}</p>
+                    <div className="new-chat-warning-actions">
+                      <button
+                        type="button"
+                        className="ghost-button"
+                        onClick={() => void registerWorkspaceRoot()}
+                        disabled={registerBusy || !workspacePath.trim()}
+                      >
+                        {registerBusy ? "Adding..." : "Add to repo roots"}
+                      </button>
+                      {registerError ? (
+                        <span className="card-warning">{registerError}</span>
+                      ) : null}
+                    </div>
+                  </div>
+                ) : (
+                  <div className="banner error">{workspaceConfigError}</div>
+                )
+              ) : null}
+              {!scan?.config.exists ? (
+                <p className="panel-note">Global config not found; using defaults.</p>
+              ) : null}
+              {!workspacePath.trim() ? (
+                <p className="ghost">Set a workspace path to edit defaults.</p>
+              ) : workspaceConfigIssue === "not_registered" ? null : workspaceConfigText?.parse_error ? (
+                <p className="card-warning">{workspaceConfigText.parse_error}</p>
+              ) : !workspaceConfigExists ? (
+                <p className="panel-note">
+                  No workspace config yet. Changes will create {workspaceConfigPath}.
+                </p>
+              ) : null}
+              <div className="form-grid compact">
+                <label>
+                  Model
+                  <input
+                    type="text"
+                    list="codex-models"
+                    value={overridesDraft.model.value}
+                    onChange={(event) => updateOverride("model", event.target.value)}
+                    onBlur={() => resetOverrideIfEmpty("model")}
+                    placeholder="gpt-5.2-codex"
+                  />
+                  <datalist id="codex-models">
+                    {modelOptions.map((model) => (
+                      <option key={model} value={model} />
+                    ))}
+                  </datalist>
+                </label>
+                <label>
+                  Approval policy
+                  <select
+                    value={overridesDraft.approval_policy.value}
+                    onChange={(event) =>
+                      updateOverride("approval_policy", event.target.value)
+                    }
+                  >
+                    {overridesDraft.approval_policy.value ? null : (
+                      <option value="" disabled>
+                        Default
+                      </option>
+                    )}
+                    {APPROVAL_POLICIES.map((policy) => (
+                      <option key={policy.value} value={policy.value}>
+                        {policy.label}
+                      </option>
+                    ))}
+                  </select>
+                </label>
+                <label>
+                  Sandbox mode
+                  <select
+                    value={overridesDraft.sandbox_mode.value}
+                    onChange={(event) =>
+                      updateOverride("sandbox_mode", event.target.value)
+                    }
+                  >
+                    {overridesDraft.sandbox_mode.value ? null : (
+                      <option value="" disabled>
+                        Default
+                      </option>
+                    )}
+                    {SANDBOX_MODES.map((mode) => (
+                      <option key={mode.value} value={mode.value}>
+                        {mode.label}
+                      </option>
+                    ))}
+                  </select>
+                </label>
+                <label>
+                  Web search
+                  <select
+                    value={overridesDraft.web_search.value}
+                    onChange={(event) => updateOverride("web_search", event.target.value)}
+                  >
+                    {overridesDraft.web_search.value ? null : (
+                      <option value="" disabled>
+                        Default
+                      </option>
+                    )}
+                    {WEB_SEARCH_MODES.map((mode) => (
+                      <option key={mode.value} value={mode.value}>
+                        {mode.label}
+                      </option>
+                    ))}
+                  </select>
+                </label>
+                <label className="span-2">
+                  Reasoning effort
+                  <select
+                    value={overridesDraft.model_reasoning_effort.value}
+                    onChange={(event) =>
+                      updateOverride("model_reasoning_effort", event.target.value)
+                    }
+                  >
+                    {overridesDraft.model_reasoning_effort.value ? null : (
+                      <option value="" disabled>
+                        Default
+                      </option>
+                    )}
+                    {reasoningOptions.map((effort) => (
+                      <option key={effort.value} value={effort.value}>
+                        {effort.label}
+                      </option>
+                    ))}
+                  </select>
+                </label>
+              </div>
+              <p className="panel-note">
+                {supportsXHigh
+                  ? "XHigh is available for GPT-5.2 family models."
+                  : "XHigh is only available on GPT-5.2 family models."}
+              </p>
+            </div>
+            <div className="new-chat-command">
+              <div className="new-chat-command-row">
+                <div className="new-chat-command-preview">
+                  <div className="new-chat-command-text">
+                    {commandBusy
+                      ? "Building command..."
+                      : commandPreview?.display ??
+                        "Enter a workspace path to preview the command."}
+                  </div>
+                  {overridesSummary && workspacePath.trim() ? (
+                    <div className="new-chat-command-meta">
+                      Overrides: {overridesSummary}
+                    </div>
+                  ) : null}
+                </div>
+                <button
+                  type="button"
+                  className="ghost-button"
+                  onClick={() => void requestCommandAction("copy")}
+                  disabled={commandBusy || !workspacePath.trim()}
+                >
+                  Copy
+                </button>
+                {commandCopyNotice ? (
+                  <span className="pill">{commandCopyNotice}</span>
                 ) : null}
               </div>
-            ) : null}
-            <div className="modal-actions">
+            </div>
+            <div className="modal-actions new-chat-actions">
               <button className="ghost-button" onClick={() => setNewChatOpen(false)}>
                 Cancel
               </button>
               <button
-                className="ghost-button"
-                onClick={() => void copyNewChatCommand()}
-                disabled={commandBusy || !workspacePath.trim()}
-              >
-                Copy command
-              </button>
-              <button
                 className="primary"
-                onClick={() => void runNewChatCommand()}
+                onClick={() => void requestCommandAction("run")}
                 disabled={commandBusy || !workspacePath.trim()}
               >
-                {commandBusy ? "Running..." : "Open in CLI"}
+                {commandBusy ? "Launching..." : "Open in CLI"}
               </button>
             </div>
           </div>

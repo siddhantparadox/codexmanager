@@ -28,6 +28,7 @@ pub fn run() {
       commands::chat_session_latest,
       commands::chat_session_page,
       commands::read_config_text,
+      commands::read_workspace_config_text,
       commands::read_skill_text,
       commands::list_skill_files,
       commands::fetch_public_skill,
