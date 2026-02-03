@@ -20,7 +20,5 @@ Thumbs.db
 src-tauri/target/
 target/
 
-
-DesignDoc.md
-chat-plan.md
 project.md
+DesignDoc.md

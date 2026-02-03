@@ -1,24 +1,12 @@
-use toml_edit::{ArrayOfTables, DocumentMut, Item, Table, Value, value};
+use toml_edit::{Array, ArrayOfTables, DocumentMut, Item, Table, Value, value};
 
 use crate::errors::{AppError, AppResult};
-use crate::models::ScalarValue;
+use crate::models::{ConfigPathChange, ScalarValue};
 
 pub fn set_root_scalar(input: &str, key: &str, scalar: ScalarValue) -> AppResult<String> {
   let mut doc = parse_doc(input)?;
-  match scalar {
-    ScalarValue::String(inner) => {
-      doc[key] = value(inner);
-    }
-    ScalarValue::Integer(inner) => {
-      doc[key] = value(inner);
-    }
-    ScalarValue::Float(inner) => {
-      doc[key] = value(inner);
-    }
-    ScalarValue::Boolean(inner) => {
-      doc[key] = value(inner);
-    }
-  }
+  doc[key] = scalar_to_item(scalar);
+  normalize_root_table_order(&mut doc);
   Ok(render_doc(input, &doc))
 }
 
@@ -63,6 +51,18 @@ pub fn set_value_at_path(
     }
   }
   Err(AppError::new("path", "Unable to update config path"))
+}
+
+pub fn set_values_at_paths(
+  input: &str,
+  changes: &[ConfigPathChange],
+) -> AppResult<String> {
+  let mut doc = parse_doc(input)?;
+  for change in changes {
+    upsert_value_at_path(doc.as_item_mut(), &change.path, change.value.clone())?;
+  }
+  normalize_root_table_order(&mut doc);
+  Ok(render_doc(input, &doc))
 }
 
 pub fn set_mcp_enabled(input: &str, name: &str, enabled: bool) -> AppResult<String> {
@@ -155,6 +155,70 @@ fn scalar_to_item(scalar: ScalarValue) -> Item {
     ScalarValue::Integer(inner) => value(inner),
     ScalarValue::Float(inner) => value(inner),
     ScalarValue::Boolean(inner) => value(inner),
+    ScalarValue::StringList(items) => {
+      let mut array = Array::new();
+      for item in items {
+        array.push(item);
+      }
+      array.fmt();
+      Item::Value(Value::Array(array))
+    }
+  }
+}
+
+fn upsert_value_at_path(
+  root: &mut Item,
+  path: &[String],
+  scalar: ScalarValue,
+) -> AppResult<()> {
+  if path.is_empty() {
+    return Err(AppError::new("path", "Path cannot be empty"));
+  }
+  let mut current = root;
+  for (index, segment) in path.iter().enumerate() {
+    let is_last = index + 1 == path.len();
+    match current {
+      Item::Table(table) => {
+        if is_last {
+          table[segment] = scalar_to_item(scalar);
+          return Ok(());
+        }
+        if !table.contains_key(segment) {
+          table.insert(segment, Item::Table(Table::new()));
+        }
+        let next = table
+          .get_mut(segment)
+          .ok_or_else(|| AppError::new("path_missing", "Config path not found"))?;
+        if !next.is_table() {
+          return Err(AppError::new("path_invalid", "Config path is not a table"));
+        }
+        current = next;
+      }
+      _ => {
+        return Err(AppError::new("path_invalid", "Config path is not a table"));
+      }
+    }
+  }
+  Err(AppError::new("path", "Unable to update config path"))
+}
+
+fn normalize_root_table_order(doc: &mut DocumentMut) {
+  let root = doc.as_table_mut();
+  let mut scalars: Vec<(String, Item)> = Vec::new();
+  let mut tables: Vec<(String, Item)> = Vec::new();
+  for (key, item) in root.iter() {
+    if item.is_table() || item.is_array_of_tables() {
+      tables.push((key.to_string(), item.clone()));
+    } else {
+      scalars.push((key.to_string(), item.clone()));
+    }
+  }
+  root.clear();
+  for (key, item) in scalars {
+    root.insert(&key, item);
+  }
+  for (key, item) in tables {
+    root.insert(&key, item);
   }
 }
 

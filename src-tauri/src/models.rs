@@ -18,6 +18,110 @@ pub struct ScanState {
 }
 
 #[derive(Debug, Serialize)]
+pub struct ChatSessionSummary {
+  pub id: String,
+  pub first_ts: Option<i64>,
+  pub last_ts: Option<i64>,
+  pub message_count: u64,
+  pub last_model: Option<String>,
+  pub last_cwd: Option<String>,
+  pub title: Option<String>,
+  pub draft: Option<String>,
+  pub pinned: bool,
+  pub archived: bool,
+  pub last_read_ts: Option<i64>,
+  pub has_unread: bool,
+}
+
+#[derive(Debug, Serialize)]
+pub struct ChatSessionsResponse {
+  pub sessions_path: String,
+  pub sessions_dir_exists: bool,
+  pub sessions: Vec<ChatSessionSummary>,
+  pub files_seen: usize,
+  pub files_parsed: usize,
+  pub parse_errors: usize,
+}
+
+#[derive(Debug, Serialize, Clone)]
+pub struct ChatMessage {
+  pub id: String,
+  pub role: String,
+  pub content: String,
+  pub timestamp: Option<i64>,
+  #[serde(skip_serializing_if = "Option::is_none")]
+  pub tool_name: Option<String>,
+  #[serde(skip_serializing_if = "Option::is_none")]
+  pub tool_call_id: Option<String>,
+  #[serde(skip_serializing_if = "Option::is_none")]
+  pub tool_status: Option<String>,
+  #[serde(skip_serializing_if = "Option::is_none")]
+  pub kind: Option<String>,
+  #[serde(skip_serializing_if = "Option::is_none")]
+  pub subtype: Option<String>,
+  #[serde(skip_serializing_if = "Option::is_none")]
+  pub raw_type: Option<String>,
+}
+
+#[derive(Debug, Serialize)]
+pub struct ChatMessagesPage {
+  pub session_id: String,
+  pub total_count: usize,
+  pub next_cursor: Option<usize>,
+  pub messages: Vec<ChatMessage>,
+}
+
+#[derive(Debug, Serialize, Deserialize, Clone, Default)]
+pub struct CodexRunOptions {
+  pub cwd: Option<String>,
+  pub profile: Option<String>,
+  pub model: Option<String>,
+  pub sandbox: Option<String>,
+  pub approvals: Option<String>,
+  pub search: Option<bool>,
+  pub prompt: Option<String>,
+}
+
+#[derive(Debug, Serialize, Deserialize, Clone)]
+pub struct CodexCommandRequest {
+  pub kind: String,
+  pub session_id: Option<String>,
+  pub options: CodexRunOptions,
+}
+
+#[derive(Debug, Serialize, Deserialize, Clone)]
+pub struct CodexCommandPreview {
+  pub executable: String,
+  pub args: Vec<String>,
+  pub display: String,
+  pub cwd: Option<String>,
+}
+
+#[derive(Debug, Serialize, Deserialize, Clone)]
+pub struct CodexCommandResult {
+  pub preview: CodexCommandPreview,
+  pub stdout: String,
+  pub stderr: String,
+  pub exit_code: Option<i32>,
+  pub timed_out: bool,
+}
+
+#[derive(Debug, Serialize, Deserialize, Clone)]
+pub struct WorkspaceEntry {
+  pub id: String,
+  pub name: Option<String>,
+  pub path: String,
+  pub default_profile: Option<String>,
+  pub last_run: Option<CodexRunOptions>,
+}
+
+#[derive(Debug, Serialize, Deserialize, Default)]
+pub struct WorkspaceRegistry {
+  pub version: u32,
+  pub items: Vec<WorkspaceEntry>,
+}
+
+#[derive(Debug, Serialize)]
 pub struct ConfigSummary {
   pub path: String,
   pub exists: bool,
@@ -140,6 +244,7 @@ pub struct ConfigText {
   pub redacted: bool,
   pub parsed: Option<JsonValue>,
   pub parse_error: Option<String>,
+  pub exists: bool,
 }
 
 #[derive(Debug, Serialize, Deserialize, Clone)]
@@ -180,6 +285,8 @@ pub enum ChangeRequest {
   ToggleMcpServer { name: String, enabled: bool },
   SetConfigScalar { key: String, value: ScalarValue },
   SetConfigPath { path: Vec<String>, value: ScalarValue },
+  SetConfigPaths { changes: Vec<ConfigPathChange> },
+  SetWorkspaceConfigPaths { workspace_root: String, changes: Vec<ConfigPathChange> },
   ReplaceConfig { content: String },
   UpsertMcpServer { name: String, table_toml: String },
   DeleteMcpServer { name: String },
@@ -206,6 +313,12 @@ pub enum ChangeRequest {
 }
 
 #[derive(Debug, Serialize, Deserialize, Clone)]
+pub struct ConfigPathChange {
+  pub path: Vec<String>,
+  pub value: ScalarValue,
+}
+
+#[derive(Debug, Serialize, Deserialize, Clone)]
 #[serde(rename_all = "snake_case")]
 pub enum InstallMode {
   Overlay,
@@ -220,13 +333,14 @@ pub enum SkillScope {
   Repo,
 }
 
-#[derive(Debug, Serialize, Deserialize)]
+#[derive(Debug, Serialize, Deserialize, Clone)]
 #[serde(tag = "kind", content = "value", rename_all = "snake_case")]
 pub enum ScalarValue {
   String(String),
   Integer(i64),
   Float(f64),
   Boolean(bool),
+  StringList(Vec<String>),
 }
 
 #[derive(Debug, Serialize, Deserialize)]

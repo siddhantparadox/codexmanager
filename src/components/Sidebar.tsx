@@ -3,6 +3,7 @@ import { useAppState } from "../store/appStore";
 
 const NAV_ITEMS = [
   { label: "Dashboard", to: "/" },
+  { label: "Chats", to: "/chats" },
   { label: "Config", to: "/config" },
   { label: "MCP Servers", to: "/mcp" },
   { label: "Skills", to: "/skills" },
